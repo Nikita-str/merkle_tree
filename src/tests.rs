@@ -28,7 +28,7 @@ fn unsecure_next_lvl_hash(prev_lvl: &[u64], arity: usize) -> Vec<u64> {
 } 
 
 #[test]
-fn mt_with_unsecure_hasher_test() {
+fn unsecure_mt_push_test() {
     const RAND_N: usize = 5;
     let mut rng = rand::rng();
 
@@ -54,12 +54,12 @@ fn mt_with_unsecure_hasher_test() {
         for data in vec.clone() {
             awaited.push(unsecure_hash(data))
         }
-        assert_eq!(tree.get_lvl(0), &awaited, "init vec is {vec:?}");
+        assert_eq!(tree.get_lvl(0).to_vec(), &awaited, "init vec is {vec:?}");
     
         let mut lvl = 1; 
         loop {
             awaited = unsecure_next_lvl_hash(&awaited, arity);
-            assert_eq!(tree.get_lvl(lvl), &awaited, "init vec is {vec:?}");
+            assert_eq!(tree.get_lvl(lvl).to_vec(), &awaited, "init vec is {vec:?}");
             if awaited.len() == 1 { break; }
             lvl += 1;
         }
@@ -89,14 +89,143 @@ fn mt_with_unsecure_hasher_test() {
         for data in vec.clone() {
             awaited.push(unsecure_hash(data))
         }
-        assert_eq!(tree.get_lvl(0), &awaited, "init vec is {vec:?}");
+        assert_eq!(tree.get_lvl(0).to_vec(), &awaited, "init vec is {vec:?}");
     
         let mut lvl = 1; 
         loop {
             awaited = unsecure_next_lvl_hash(&awaited, arity);
-            assert_eq!(tree.get_lvl(lvl), &awaited, "init vec is {vec:?}");
+            assert_eq!(tree.get_lvl(lvl).to_vec(), &awaited, "init vec is {vec:?}");
             if awaited.len() == 1 { break; }
             lvl += 1;
         }
     }
+}
+
+#[test]
+fn unsecure_mt_eq_test() {
+    fn get_initiated_tree<const ARITY: usize>(vec: &[u64]) -> MerkleTree::<u64, UnsecureHasher, ARITY> {
+        let hasher = UnsecureHasher::new();
+        let mut tree = MerkleTree::<u64, UnsecureHasher, ARITY>::new_minimal(hasher);
+        for data in vec {
+            tree.push_data(*data);
+        }
+        tree
+    }
+    // all next trees(ARITY is 3) are equal:
+    // 1 2 3 | 4 5 _ | _ _ _
+    // 1 2 3 | 4 5 5 | _ _ _
+    // 1 2 3 | 4 5 5 | 4 5 _
+    // 1 2 3 | 4 5 5 | 4 5 5
+    // no one of them are equal with:
+    // 1 2 3 | 4 5 5 | 4 4 5
+    // 1 2 3 | 4 5 5 | 4 5 6
+    // 1 2 3 | 4 5 6 | _ _ _
+    // 1 2 3 | 4 5 5 | 4 5 5 || 1 _ _ | ... // because of height
+    // 1 2 3 | 4 5 5 | 4 _ _ // because it is `1 2 3 | 4 5 5 | 4 4 4`
+    let non_eq = [
+        get_initiated_tree::<3>(&[1, 2, 3, 4, 5, 6]),
+        get_initiated_tree::<3>(&[1, 2, 3, 4, 5, 5, 4, 4, 5]),
+        get_initiated_tree::<3>(&[1, 2, 3, 4, 5, 5, 4, 5, 6]),
+        get_initiated_tree::<3>(&[1, 2, 3, 4, 5, 5, 4, 5, 6]),
+        get_initiated_tree::<3>(&[1, 2, 3, 4, 5, 5, 4]),
+        get_initiated_tree::<3>(&[1, 2, 3, 4, 5, 5, 4, 5, 5, 1]),
+    ];
+    let a = get_initiated_tree::<3>(&[1, 2, 3, 4, 5]);
+
+    let assert = |b| {
+        assert_eq!(a, b, "a = b test");
+        assert_eq!(b, a, "b = a test");
+        for lvl in 0..b.height() {
+            assert_eq!(a.get_lvl(lvl), b.get_lvl(lvl), "lvl {lvl} test");
+        }
+        non_eq.iter().for_each(|x|{
+            assert_ne!(x, &b, "x != b test");
+            assert_ne!(&b, x, "b != x test");
+            assert_ne!(b.get_lvl(0), x.get_lvl(0), "non eq lvl 0 test");
+        });
+    };
+
+    let b = get_initiated_tree::<3>(&[1, 2, 3, 4, 5]);
+    assert(b);
+
+    let b = get_initiated_tree::<3>(&[1, 2, 3, 4, 5, 5]);
+    assert(b);
+    
+    let b = get_initiated_tree::<3>(&[1, 2, 3, 4, 5, 5, 4, 5]);
+    assert(b);
+    
+    let b = get_initiated_tree::<3>(&[1, 2, 3, 4, 5, 5, 4, 5, 5]);
+    assert(b);
+    
+    // next trees are equal:
+    // 1 2 3 | 4 5 1 | 4 2 5 || 8 7 6 | 9 3 _ | ... 
+    // 1 2 3 | 4 5 1 | 4 2 5 || 8 7 6 | 9 3 3 | 9 3 3 || 8 7 6 | 9 3
+    // 1 2 3 | 4 5 1 | 4 2 5 || 8 7 6 | 9 3 3 | 9 3 3 || 8 7 6 | 9 3 3 | 9 3 3
+    // and non eq with:
+    // 1 2 3 | 4 5 1 | 4 2 5 || 8 7 6 | 9 3 3 | 9 3 3 || 8 7 6 | 
+    // 1 2 3 | 4 5 1 | 4 2 5 || 8 7 6 | 9 3 3 | 9 3 3 || 8 7 6 | 9 
+    // 1 2 3 | 4 5 1 | 4 2 5 || 8 7 6 | 9 3 3 | 9 3 3 || 8 7 6 | 9 3 3 | 9<9>3
+    // 1 2 3 | 4 5 1 | 4 2 5 || 8 7 6 | 9 3 3 | 9 3 3 || 8<6>6 | 9 3 3 | 9 3 3
+    let a = [1, 2, 3, 4, 5, 1, 4, 2, 5, /* || */ 8, 7, 6, 9, 3];
+    let a = get_initiated_tree::<3>(&a);
+
+    let b = [
+        1, 2, 3, 4, 5, 1, 4, 2, 5, 
+        8, 7, 6, 9, 3, 3, 9, 3, 3, 
+        8, 7, 6, 9, 3, 3, 9, 3, 3,
+    ];
+    let b = get_initiated_tree::<3>(&b);
+    assert_eq!(a, b);
+    assert_eq!(b, a);
+
+    let not_eq: &[&[_]] = &[
+        &[
+            1, 2, 3, 4, 5, 1, 4, 2, 5, 
+            8, 7, 6, 9, 3, 3, 9, 3, 3, 
+            8, 7, 6,
+        ],
+        &[
+            1, 2, 3, 4, 5, 1, 4, 2, 5, 
+            8, 7, 6, 9, 3, 3, 9, 3, 3, 
+            8, 7, 6, 9,
+        ],
+        &[
+            1, 2, 3, 4, 5, 1, 4, 2, 5, 
+            8, 7, 6, 9, 3, 3, 9, 9, 3, 
+            8, 7, 6, 9, 3, 3, 9, 3, 3,
+        ],
+        &[
+            1, 2, 3, 4, 5, 1, 4, 2, 5, 
+            8, 7, 6, 9, 3, 3, 9, 3, 3, 
+            8, 6, 6, 9, 3, 3, 9, 3, 3,
+        ],
+    ];
+    let not_eq: Vec<_> = not_eq.iter().map(|x|get_initiated_tree::<3>(x)).collect();
+    for ne in &not_eq {
+        assert_ne!(&a, ne);
+        assert_ne!(&b, ne);
+        assert_ne!(ne, &b);
+        assert_ne!(ne, &a);
+    }
+    not_eq.iter().for_each(|not_eq|{
+        assert_ne!(a.get_lvl(0), not_eq.get_lvl(0), "non eq lvl 0 test");
+        assert_ne!(b.get_lvl(0), not_eq.get_lvl(0), "non eq lvl 0 test");
+    });
+    
+    let b = [
+        1, 2, 3, 4, 5, 1, 4, 2, 5, 
+        8, 7, 6, 9, 3, 3, 9, 3, 3, 
+        8, 7, 6, 9, 3, 3
+    ];
+    let b = get_initiated_tree::<3>(&b);
+    assert_eq!(a, b);
+    assert_eq!(b, a);
+    for ne in &not_eq {
+        assert_ne!(&b, ne);
+        assert_ne!(ne, &b);
+    }
+    not_eq.iter().for_each(|not_eq|{
+        assert_ne!(a.get_lvl(0), not_eq.get_lvl(0), "non eq lvl 0 test");
+        assert_ne!(b.get_lvl(0), not_eq.get_lvl(0), "non eq lvl 0 test");
+    });
 }

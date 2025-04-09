@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 use crate::MtArityHasher as ArityHasher;
 use crate::MtDataHasher as DataHasher;
 
-fn length_in_base(mut n: u64, base: u64) -> usize {
+fn length_in_base(mut n: usize, base: usize) -> u32 {
     let mut len = 0;
     while n > 0 {
         n /= base;
@@ -11,8 +11,103 @@ fn length_in_base(mut n: u64, base: u64) -> usize {
     len
 }
 
+
 struct MerkleTreePath {
     bin_path: Vec<u8>, // TODO: SmallVec
+}
+
+/// `Mt` stands for `MerkleTree`
+#[derive(Clone, Copy, Debug)]
+pub struct MtLvl<'mt_ref, Hash, const ARITY: usize> {
+    lvl: Option<&'mt_ref Vec<Hash>>,
+}
+impl<'mt_ref, Hash, const ARITY: usize> MtLvl<'mt_ref, Hash, ARITY> {
+    pub fn new_empty() -> Self {
+        Self { lvl: None }
+    }
+    pub fn new(lvl: &'mt_ref Vec<Hash>) -> Self {
+        let lvl = (!lvl.is_empty()).then_some(lvl);
+        Self { lvl }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.lvl.is_none()
+    }
+    /// # panic
+    /// * if `self.is_empty()`
+    pub fn to_vec(&self) -> &Vec<Hash> {
+        self.lvl.unwrap()
+    }
+}
+impl<'mt_ref, Hash: Eq, const ARITY: usize> Eq for MtLvl<'mt_ref, Hash, ARITY> { }
+impl<'mt_ref, Hash: Eq, const ARITY: usize> PartialEq for MtLvl<'mt_ref, Hash, ARITY> {
+    fn eq(&self, other: &Self) -> bool {
+        let (a, b) = match (self.is_empty(), other.is_empty()) {
+            (true, true) => return true,
+            (false, false) => (self.to_vec(), other.to_vec()),
+            _ => return false,
+        };
+
+        let (a, b) = if a.len() <= b.len() {
+            (a, b)
+        } else {
+            (b, a)
+        };
+        let a_len = a.len();
+        let b_len = b.len();
+
+        if a_len != b_len {
+            println!("LEN: {} & {}", a.len(), b.len());
+            // in this case tree have different height
+            let arity_len = length_in_base(a_len - 1, ARITY);
+            if arity_len != length_in_base(b_len - 1, ARITY) { return false }
+    
+            // tests if all excess elems in b are agree with elemnts in a
+            //
+            // elements agrees if elements in corresp. window is equal:
+            // || 0 1 2 | 3 4 _ | _ _ _ || 
+            // the same as:
+            // || 0 1 2 | 3 4 4 | 3 4 4 ||
+            // window size is calculated by inversing ARITY numeral system numbers in index:
+            // index = 12 = 110_3 then repetiotins will be: 222_3 - 110_3 = 112_3 
+            // so there will be [2, 1, 1] repetions with window size [1, 3, 9]
+            let mut a_index = a_len - 1;
+            let mut b_index = a_len;
+            let mut window_sz = 1;
+            'excess: while a_index != 0 {
+                let repetitions = a_index % ARITY;
+                for i in 1..=repetitions {
+                    let a_index_pre_calc = b_index - i * window_sz;
+                    let b_index_pre_calc = b_index;
+                    for j in 0..window_sz {
+                        let l_index = b_index_pre_calc + j;
+                        let r_index = a_index_pre_calc + j;
+                        println!("{} =?= {}", l_index, r_index);
+                        if b[l_index] != b[r_index] { return false }
+                        b_index += 1;
+                        if b_index == b_len { break 'excess }
+                    }
+                }
+                window_sz *= ARITY;
+                a_index /= ARITY;
+            }
+
+            // it can be done faster (less elements can be checked)
+            //
+            // now catch cases like this:
+            // || 0 1 2 | 3 4 _ | _ _ _ || 
+            //  not eq
+            // || 0 1 2 | 3 4 4 | 3 _ _ ||
+
+            // WIP : STOP HERE
+        }
+
+        for i in 0..a_len {
+            if a[i] != b[i] { return false }
+        }
+
+        return true
+    }
 }
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
@@ -33,7 +128,24 @@ pub struct MerkleTree<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize
     new_lvl_cap: usize,
     phantom: PhantomData<Hasher>,
 }
+impl<Hash: Eq, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> Eq for MerkleTree<Hash, Hasher, ARITY> { }
+impl<Hash: Eq, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> PartialEq for MerkleTree<Hash, Hasher, ARITY> {
+    /// ⚠️ tests only equality of trees itself
+    /// (don't test that the hashers are the same, in case if hasher rely on some private arg)
+    fn eq(&self, b: &Self) -> bool {
+        let a = self; 
+        if a.height() != b.height() { println!("TODO:DEL:height"); return false }
+
+        for lvl in (0..a.height()).rev() {
+            if a.get_lvl(lvl) != b.get_lvl(lvl) { println!("TODO:DEL:lvl={lvl}"); return false; }
+        }
+
+        return true;
+    }
+}
 // TODO: write batched
+// TODO: merge
+// TODO: split (need clone for Hasher & Hash)
 
 impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {
     // TODO: new_capacity / new_height
@@ -62,8 +174,12 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     }
 
     // TODO: TreeLvl struct that allow to test eq, and can be true if all last is eq to another 
-    pub fn get_lvl(&self, lvl: usize) -> &Vec<Hash> {
-        &self.tree_lvls[lvl]
+    pub fn get_lvl(&self, lvl: usize) -> MtLvl<'_, Hash, ARITY> {
+        if lvl < self.height() {
+            MtLvl::new(&self.tree_lvls[lvl])
+        } else {
+            MtLvl::new_empty()
+        }
     }
 
     pub fn valid_leaf_id(&self, id: LeafId) -> bool {
@@ -120,11 +236,35 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
 }
 impl<Hash, Hasher:  ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY>
 {
+    pub fn hash_data<Data>(&mut self, data: Data) -> Hash
+    where Hasher: DataHasher<Hash, Data>
+    {
+        self.hasher.hash_data(data)
+    }
+
     pub fn push_data<Data>(&mut self, data: Data) -> LeafId
     where Hasher: DataHasher<Hash, Data>
     {
-        let hash = self.hasher.hash_data(data);
+        let hash = self.hash_data(data);
         self.push(hash)
     }
 }
 
+
+#[cfg(test)]
+#[test]
+fn todo_del() {
+    assert_eq!(length_in_base(0, 3), 0);
+    assert_eq!(length_in_base(1, 3), 1);
+    assert_eq!(length_in_base(2, 3), 1);
+    assert_eq!(length_in_base(3, 3), 2);
+    assert_eq!(length_in_base(5, 3), 2);
+    assert_eq!(length_in_base(8, 3), 2);
+    assert_eq!(length_in_base(9, 3), 3);
+    assert_eq!(length_in_base(10, 3), 3);
+    assert_eq!(length_in_base(26, 3), 3);
+    assert_eq!(length_in_base(27, 3), 4);
+    assert_eq!(length_in_base(28, 3), 4);
+    assert_eq!(length_in_base(80, 3), 4);
+    assert_eq!(length_in_base(85, 3), 5);
+}
