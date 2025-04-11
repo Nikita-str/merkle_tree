@@ -322,6 +322,13 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
         }
     }
 
+    /// Add a leaf.
+    /// 
+    /// If you need push data you can use [`Self::push_data`]
+    /// 
+    /// If you need push many elements, better use 
+    /// [`Self::push_batched`] & [`Self::push_batched_data`] 
+    /// they are faster.
     pub fn push(&mut self, hash: Hash) -> LeafId {
         if self.leaf_elems() == self.add_lvl_sz {
             self.add_lvl_sz *= ARITY;
@@ -335,6 +342,14 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
         LeafId::new(self.tree_lvls[0].len() - 1)
     }
 
+    /// Replace a leaf.
+    /// 
+    /// If you need replace by data you can use [`Self::replace_data`]
+    /// 
+    /// If you need push many elements, better use 
+    /// [`Self::push_batched`] & [`Self::push_batched_data`] 
+    /// they are faster.
+    /// 
     /// # panic
     /// * if `self.valid_leaf_id(id)` is false
     pub fn replace(&mut self, hash: Hash, id: LeafId) {
@@ -343,6 +358,10 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
         self.recalc_elem_hashes(elem_n);
     }
 
+    /// Add batch of leafs by hashing data.\
+    /// It's faster than many single pushes.
+    /// 
+    /// If you need push a single data you can use [`Self::push_data`]
     pub fn push_batched_data<Data>(&mut self, batch: impl IntoIterator<Item = Data>) -> std::ops::Range<LeafId>
     where Hasher: StaticDataHasher<Hash, Data>
     {
@@ -350,10 +369,20 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
         self.push_batched(batch.into_iter().map(map))
     }
 
+    /// Add batch of leafs.\
+    /// It's faster than many single pushes.
+    /// 
+    /// If you need push a single leaf you can use [`Self::push`]
+    /// 
+    /// If you need push batch of data you can use [`Self::push_batched_data`]
     pub fn push_batched(&mut self, batch: impl IntoIterator<Item = Hash>) -> std::ops::Range<LeafId> {
         self.replace_batched(batch, self.last_leaf_id())
     }
 
+    /// Replace batch of leafs by hashing data.\
+    /// It's faster than many single replaces.
+    /// 
+    /// If you need replace a single data you can use [`Self::replace_data`]
     pub fn replace_batched_data<Data, I>(&mut self, batch: I, start_id: LeafId) -> std::ops::Range<LeafId>
     where
         I: IntoIterator<Item = Data>,
@@ -363,6 +392,13 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
         self.replace_batched(batch.into_iter().map(map), start_id)
     }
 
+    /// Replace batch of leafs.\
+    /// It's faster than many single replaces.
+    /// 
+    /// If you need replace a single leaf you can use [`Self::replace`]
+    /// 
+    /// If you need replace batch of data you can use [`Self::replace_batched_data`]
+    /// 
     /// # panic
     /// * if `start_id` > `last_leaf_id`
     pub fn replace_batched(&mut self, batch: impl IntoIterator<Item = Hash>, start_id: LeafId) -> std::ops::Range<LeafId> {
@@ -447,10 +483,31 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
         self.hasher.hash_data(data)
     }
 
+    /// Add a leaf.
+    /// 
+    /// If you need push hash you can use [`Self::push`]
+    /// 
+    /// If you need push many elements, better use
+    /// [`Self::push_batched`] & [`Self::push_batched_data`] 
+    /// they are faster.
     pub fn push_data<Data>(&mut self, data: Data) -> LeafId
     where Hasher: DataHasher<Hash, Data>
     {
         let hash = self.hash_data(data);
         self.push(hash)
+    }
+    
+    /// Replace a leaf.
+    /// 
+    /// If you need replace a hash you can use [`Self::replace`]
+    /// 
+    /// If you need replace many elements in a row, better use 
+    /// [`Self::replace_batched_data`] 
+    /// they are faster.
+    pub fn replace_data<Data>(&mut self, data: Data, id: LeafId)
+    where Hasher: DataHasher<Hash, Data>
+    {
+        let hash = self.hash_data(data);
+        self.replace(hash, id)
     }
 }
