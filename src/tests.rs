@@ -1,6 +1,6 @@
 use std::str::FromStr;
-use rand::RngCore;
-use crate::{merkle_tree::MtLvl, MerkleTree, MtDataHasher, UnsecureHasher};
+use rand::{Rng, RngCore};
+use crate::{merkle_tree::{LeafId, MtLvl}, MerkleTree, MtDataHasher, UnsecureHasher};
 
 fn unsecure_hash(x: u64) -> u64 {
     let mut hasher = std::hash::DefaultHasher::new();
@@ -421,10 +421,11 @@ pub fn push_batched_test() {
 
     let vecss = vec![
         vec![(1u64..9).collect::<Vec<_>>(), (9..=25).collect(), (26..35).collect()],
-        vec![(1u64..7).collect::<Vec<_>>(), (9..=25).collect(), (26..35).collect()],
-        vec![(1u64..17).collect::<Vec<_>>(), (17..37).collect(), (37..59).collect()],
-        vec![(1u64..16).collect::<Vec<_>>(), (16..38).collect(), (38..60).collect()],
-        vec![(1u64..17).collect::<Vec<_>>(), (100..134).collect(), (200..229).collect()],
+        vec![(1..7).collect::<Vec<_>>(), (9..=25).collect(), (26..35).collect()],
+        vec![(1..17).collect::<Vec<_>>(), (17..37).collect(), (37..59).collect()],
+        vec![(1..16).collect::<Vec<_>>(), (16..38).collect(), (38..60).collect()],
+        vec![(1..17).collect::<Vec<_>>(), (100..134).collect(), (200..229).collect()],
+        vec![(1..15).collect::<Vec<_>>(), (25..34).collect(), (72..76).collect(), (2..3).collect(), (205..235).collect()],
     ];
 
     for vecs in vecss {
@@ -455,10 +456,55 @@ pub fn push_batched_test() {
     }
 }
 
+#[test]
+pub fn replace_test() {
+    type Hasher = UnsecureHasher; // AddHasher;
+    let mut rng = rand::rng();
+
+    let mut vecs = vec![
+        (1u64..=9).collect::<Vec<_>>(),
+        (1u64..=24).collect::<Vec<_>>(),
+        (1u64..=39).collect::<Vec<_>>(),
+        (1u64..=25).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+        (1u64..=27).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+    ];
+
+    for _repeats in 0..13 {
+        for vec in vecs.iter_mut() {
+            let mut tree2 = MerkleTree::<u64, Hasher, 2>::new_minimal(Hasher::new());
+            let mut tree3 = MerkleTree::<u64, Hasher, 3>::new_minimal(Hasher::new());
+            let mut tree5 = MerkleTree::<u64, Hasher, 5>::new_minimal(Hasher::new());
+            tree2.push_batched(vec.clone());
+            tree3.push_batched(vec.clone());
+            tree5.push_batched(vec.clone());
+            
+            let index = rng.random_range(0..vec.len());
+            let new_hash = rng.next_u64(); 
+            vec[index] = new_hash;
+            tree2.replace(new_hash, LeafId::new(index));
+            tree3.replace(new_hash, LeafId::new(index));
+            tree5.replace(new_hash, LeafId::new(index));
+            
+            let mut tree2x = MerkleTree::<u64, Hasher, 2>::new_minimal(Hasher::new());
+            let mut tree3x = MerkleTree::<u64, Hasher, 3>::new_minimal(Hasher::new());
+            let mut tree5x = MerkleTree::<u64, Hasher, 5>::new_minimal(Hasher::new());
+            tree2x.push_batched(vec.clone());
+            tree3x.push_batched(vec.clone());
+            tree5x.push_batched(vec.clone());
+            
+            assert!(tree2.eq_full(&tree2x));
+            assert!(tree3.eq_full(&tree3x));
+            assert!(tree5.eq_full(&tree5x));
+        }
+    }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// [+] AddHasher
 
 /// ⛔ It is TOTALY INCORRECT HASH that used only for tests
 #[derive(Debug, Default)]
-pub struct AddHasher {
+struct AddHasher {
     acc: u64,
 }
 impl AddHasher {  
@@ -504,3 +550,6 @@ impl crate::MtDataHasher<u64, &[u64]> for AddHasher {
         ret
     }
 }
+
+// [-] AddHasher
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
