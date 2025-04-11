@@ -20,6 +20,9 @@ impl<'mt_ref, Hash, const ARITY: usize> MtLvl<'mt_ref, Hash, ARITY> {
         let lvl = (!lvl.is_empty()).then_some(lvl);
         Self { lvl }
     }
+    pub fn len(&self) -> usize {
+        self.lvl.map(|x|x.len()).unwrap_or(0)
+    }
 
     pub fn is_empty(&self) -> bool {
         self.lvl.is_none()
@@ -297,28 +300,38 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     }
 }
 impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {
-    fn recalc_hashes(&mut self, mut elem_n: usize) {
-        for lvl in 1..self.height() {
-            let from = elem_n - (elem_n % ARITY);
-            for i in 0..ARITY {
-                if let Some(hash) = self.tree_lvls[lvl - 1].get(from + i) {
+    /// # panic
+    /// * if `lvl` is `0` 
+    fn calc_possibly_uneven_group_hash(&mut self, elem_n_from_group: usize, lvl: usize) -> Hash {
+        let group_from = elem_n_from_group - (elem_n_from_group % ARITY);
+        for i in 0..ARITY {
+            if let Some(hash) = self.tree_lvls[lvl - 1].get(group_from + i) {
+                self.hasher.hash_arity_one_ref(hash);
+            } else {
+                for _ in i..ARITY {
+                    let hash = self.tree_lvls[lvl - 1].get(group_from + i - 1).unwrap();
                     self.hasher.hash_arity_one_ref(hash);
-                } else {
-                    for _ in i..ARITY {
-                        let hash = self.tree_lvls[lvl - 1].get(from + i - 1).unwrap();
-                        self.hasher.hash_arity_one_ref(hash);
-                    }
-                    break;
                 }
+                break;
             }
-            let new_hash = self.hasher.finish_arity();
+        }
+        self.hasher.finish_arity()
+    }
+
+    fn set_or_push(&mut self, index: usize, lvl: usize, new_hash: Hash) {
+        if let Some(prev_hash) = self.tree_lvls[lvl].get_mut(index) {
+            *prev_hash = new_hash;
+        } else {
+            self.tree_lvls[lvl].push(new_hash);
+        }
+    }
+
+    fn recalc_elem_hashes(&mut self, mut elem_n: usize) {
+        for lvl in 1..self.height() {
+            let new_hash = self.calc_possibly_uneven_group_hash(elem_n, lvl);
 
             elem_n = elem_n / ARITY;
-            if let Some(prev_hash) = self.tree_lvls[lvl].get_mut(elem_n) {
-                *prev_hash = new_hash;
-            } else {
-                self.tree_lvls[lvl].push(new_hash);
-            }
+            self.set_or_push(elem_n, lvl, new_hash);
         }
     }
 
@@ -330,7 +343,7 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
 
         let elem_n = self.leaf_elems();
         self.tree_lvls[0].push(hash);
-        self.recalc_hashes(elem_n);
+        self.recalc_elem_hashes(elem_n);
 
         LeafId::new(self.tree_lvls[0].len() - 1)
     }
@@ -340,7 +353,49 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     pub fn replace(&mut self, hash: Hash, id: LeafId) {
         let elem_n = id.0;
         self.tree_lvls[0][elem_n] = hash;
-        self.recalc_hashes(elem_n);
+        self.recalc_elem_hashes(elem_n);
+    }
+
+    pub fn push_batched(&mut self, batch: impl IntoIterator<Item = Hash>) -> std::ops::Range<LeafId> {
+        let from = LeafId::new(self.tree_lvls[0].len());
+        self.tree_lvls[0].extend(batch);
+        let to = LeafId::new(self.tree_lvls[0].len());
+
+        if from != to {
+            let mut from = from.0;
+            let mut to = to.0;
+            let mut lvl = 1;
+
+            while to != 1 {
+                if self.tree_lvls.len() <= lvl {
+                    let expected_len = (to / ARITY - from / ARITY) + 1;
+                    self.tree_lvls.push(Vec::with_capacity(self.new_lvl_cap.max(expected_len)));
+                }
+
+                let last_is_even = to % ARITY == 0;
+
+                // in next range all `tree_lvls[lvl - 1]` is valid
+                for elem_index in (from / ARITY)..(to / ARITY) {
+                    for win_index in 0..ARITY {
+                        self.hasher.hash_arity_one_ref(&self.tree_lvls[lvl - 1][elem_index * ARITY + win_index]);
+                    }
+                    let new_hash = self.hasher.finish_arity();
+                    self.set_or_push(elem_index, lvl, new_hash);
+                }
+    
+                if !last_is_even {
+                    let new_hash = self.calc_possibly_uneven_group_hash(to - 1, lvl);
+                    let elem_index = to / ARITY;
+                    self.set_or_push(elem_index, lvl, new_hash);
+                }
+                
+                lvl += 1;
+                from /= ARITY;
+                to = (to / ARITY) + (!last_is_even) as usize;
+            }
+        }
+
+        from..to
     }
 
 }

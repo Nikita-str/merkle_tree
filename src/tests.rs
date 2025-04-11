@@ -1,6 +1,6 @@
 use std::str::FromStr;
 use rand::RngCore;
-use crate::{merkle_tree::MtLvl, MerkleTree, UnsecureHasher};
+use crate::{merkle_tree::MtLvl, MerkleTree, MtDataHasher, UnsecureHasher};
 
 fn unsecure_hash(x: u64) -> u64 {
     let mut hasher = std::hash::DefaultHasher::new();
@@ -334,4 +334,173 @@ fn vec_continuation_test() {
     let mut b = to_vec_u64("1 2 3 4 5 6");
     b.extend(to_vec_u64("9 8 7 7 7 7").repeat(5));
     assert_eq!(MtLvl::<_, 6>::vec_continuation(a), b);
+}
+
+#[cfg(test)]
+#[test]
+fn add_hasher_test() {
+    use crate::{merkle_tree::LeafId, MtDataHasher};
+
+    let mut vecs: Vec<Vec<u64>> = vec![];
+    vecs.push((1..=25).collect());
+    vecs.push((1..=23).collect());
+    vecs.push((1..=22).collect());
+    vecs.push((1..=123).collect());
+    vecs.push((1..=94).collect());
+    for vec in vecs {
+        let arity = 5;
+        let mut tree = MerkleTree::<u64, AddHasher, 5>::new_minimal(AddHasher::default());
+        for data in vec.clone() {
+            tree.push_data(data);
+        }
+    
+        let mut hasher = AddHasher::default(); 
+        let mut awaited = vec![];
+        for data in vec.clone() {
+            awaited.push(hasher.hash_data(data))
+        }
+        assert_eq!(tree.get_lvl(0).to_vec(), &awaited, "init vec is {vec:?}");
+    
+        let mut lvl = 1; 
+        loop {
+            awaited = AddHasher::next_lvl_hash(awaited.as_slice(), arity);
+            assert_eq!(tree.get_lvl(lvl).to_vec(), &awaited, "init vec is {vec:?}");
+            if awaited.len() == 1 { break; }
+            lvl += 1;
+        }
+    }
+
+    let mut tree = MerkleTree::<u64, AddHasher, 3>::new_minimal(AddHasher::default());
+    for i in 0..9 {
+        tree.push(i);
+        println!("{tree:?}\n");
+    }
+
+    tree.replace(101, LeafId::new(1));
+    println!("{tree:?}\n");
+
+    
+    let mut tree = MerkleTree::<u64, AddHasher, 3>::new_minimal(AddHasher::default());
+    tree.push_batched([0, 101, 2, 3, 4, 5, 6, 7, 8]);
+    println!("{tree:?}\n");
+    
+    
+    let mut tree = MerkleTree::<u64, AddHasher, 3>::new_minimal(AddHasher::default());
+    tree.push_batched([0, 101, 2, 3, 4,]);
+    // tree.push_batched([5, 6, 7, 8]);
+    println!("{tree:?}\n");
+}
+
+#[test]
+pub fn push_batched_test() {
+    type Hasher = UnsecureHasher; // AddHasher;
+
+    let mut tree2 = MerkleTree::<u64, Hasher, 2>::new_minimal(Hasher::new());
+    let mut tree3 = MerkleTree::<u64, Hasher, 3>::new_minimal(Hasher::new());
+    let mut tree5 = MerkleTree::<u64, Hasher, 5>::new_minimal(Hasher::new());
+
+    let mut vec = Vec::with_capacity(100);
+    for x in 0..37u64 {
+        let mut tree_x2 = MerkleTree::<u64, Hasher, 2>::new_minimal(Hasher::new());
+        let mut tree_x3 = MerkleTree::<u64, Hasher, 3>::new_minimal(Hasher::new());
+        let mut tree_x5 = MerkleTree::<u64, Hasher, 5>::new_minimal(Hasher::new());
+        
+        vec.push(tree_x2.hash_data(x));
+        tree_x2.push_batched(vec.clone());
+        tree_x3.push_batched(vec.clone());
+        tree_x5.push_batched(vec.clone());
+
+        tree2.push_data(x);
+        tree3.push_data(x);
+        tree5.push_data(x);
+
+        assert!(tree2.eq_full(&tree_x2));
+        assert!(tree3.eq_full(&tree_x3));
+        assert!(tree5.eq_full(&tree_x5));
+    }
+
+    let vecss = vec![
+        vec![(1u64..9).collect::<Vec<_>>(), (9..=25).collect(), (26..35).collect()],
+        vec![(1u64..7).collect::<Vec<_>>(), (9..=25).collect(), (26..35).collect()],
+        vec![(1u64..17).collect::<Vec<_>>(), (17..37).collect(), (37..59).collect()],
+        vec![(1u64..16).collect::<Vec<_>>(), (16..38).collect(), (38..60).collect()],
+        vec![(1u64..17).collect::<Vec<_>>(), (100..134).collect(), (200..229).collect()],
+    ];
+
+    for vecs in vecss {
+        let mut tree2 = MerkleTree::<u64, Hasher, 2>::new_minimal(Hasher::new());
+        let mut tree3 = MerkleTree::<u64, Hasher, 3>::new_minimal(Hasher::new());
+        let mut tree5 = MerkleTree::<u64, Hasher, 5>::new_minimal(Hasher::new());
+    
+        let mut tree_x2 = MerkleTree::<u64, Hasher, 2>::new_minimal(Hasher::new());
+        let mut tree_x3 = MerkleTree::<u64, Hasher, 3>::new_minimal(Hasher::new());
+        let mut tree_x5 = MerkleTree::<u64, Hasher, 5>::new_minimal(Hasher::new());
+
+        for vec in vecs {
+            let vec: Vec<_> = vec.into_iter().map(|data|tree2.hash_data(data)).collect();
+
+            for x in vec.clone() {
+                tree2.push(x);
+                tree3.push(x);
+                tree5.push(x);
+            }
+            tree_x2.push_batched(vec.clone());
+            tree_x3.push_batched(vec.clone());
+            tree_x5.push_batched(vec.clone());
+            
+            assert!(tree2.eq_full(&tree_x2));
+            assert!(tree3.eq_full(&tree_x3));
+            assert!(tree5.eq_full(&tree_x5));
+        }
+    }
+}
+
+
+/// ⛔ It is TOTALY INCORRECT HASH that used only for tests
+#[derive(Debug, Default)]
+pub struct AddHasher {
+    acc: u64,
+}
+impl AddHasher {  
+    #[allow(unused)]
+    fn new() -> Self {
+        Self::default()
+    }    
+    fn next_lvl_hash(prev_lvl: &[u64], arity: usize) -> Vec<u64> {
+        prev_lvl.chunks(arity).map(|x|{
+            let last = *x.last().unwrap();
+
+            let mut x = x.to_vec();
+            for _ in x.len()..arity {
+                x.push(last);
+            }
+
+            Self::default().hash_data(x.as_slice())
+        }).collect()
+    }
+}
+#[cfg(any(feature = "unsecure", test))]
+impl crate::MtHasher<u64> for AddHasher {
+    fn hash_one_ref(&mut self, hash: &u64) {
+        self.acc += *hash;
+    }
+    fn finish(&mut self) -> u64 {
+        let ret = self.acc;
+        self.acc = 0;
+        ret
+    }
+}
+impl crate::MtDataHasher<u64, u64> for AddHasher {
+    fn hash_data(&mut self, data: u64) -> u64 {
+        data
+    }
+}
+impl crate::MtDataHasher<u64, &[u64]> for AddHasher {
+    fn hash_data(&mut self, data: &[u64]) -> u64 {
+        let mut ret = 0;
+        for x in data {
+            ret += *x;
+        }
+        ret
+    }
 }
