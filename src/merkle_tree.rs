@@ -2,6 +2,7 @@ use std::marker::PhantomData;
 use crate::utility::{get_pad_index, length_in_base};
 use crate::MtArityHasher as ArityHasher;
 use crate::MtDataHasher as DataHasher;
+use crate::MtDataHasherStatic as StaticDataHasher;
 
 struct MerkleTreePath {
     bin_path: Vec<u8>, // TODO: SmallVec
@@ -46,6 +47,7 @@ impl<'mt_ref, Hash: Clone, const ARITY: usize> MtLvl<'mt_ref, Hash, ARITY> {
             let amount_of_win = (ARITY - 1) - (arity_mask % ARITY);
             let cur_len = lvl.len();
 
+            // lvl.copy_within, but you need unsafe null mem alloc
             buf.clear();
             buf.extend_from_slice(&lvl[cur_len - win_sz..]);
             for _ in 0..amount_of_win {
@@ -152,7 +154,7 @@ impl<'mt_ref, Hash: Eq, const ARITY: usize> PartialEq for MtLvl<'mt_ref, Hash, A
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LeafId(usize);
 impl LeafId {
     #[inline(always)]
@@ -281,6 +283,10 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     fn leaf_elems(&self) -> usize {
         self.tree_lvls[0].len()
     }
+    #[inline]
+    fn last_leaf_id(&self) -> LeafId {
+        LeafId(self.tree_lvls[0].len())
+    }
 
     /// Return requested level of tree.
     /// 
@@ -356,17 +362,64 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
         self.recalc_elem_hashes(elem_n);
     }
 
-    pub fn push_batched(&mut self, batch: impl IntoIterator<Item = Hash>) -> std::ops::Range<LeafId> {
-        let from = LeafId::new(self.tree_lvls[0].len());
-        self.tree_lvls[0].extend(batch);
-        let to = LeafId::new(self.tree_lvls[0].len());
+    pub fn push_batched_data<Data>(&mut self, batch: impl IntoIterator<Item = Data>) -> std::ops::Range<LeafId>
+    where Hasher: StaticDataHasher<Hash, Data>
+    {
+        let map = |data|Hasher::hash_data_static(data);
+        self.push_batched(batch.into_iter().map(map))
+    }
 
+    pub fn push_batched(&mut self, batch: impl IntoIterator<Item = Hash>) -> std::ops::Range<LeafId> {
+        self.replace_batched(batch, self.last_leaf_id())
+    }
+
+    pub fn replace_batched_data<Data, I>(&mut self, batch: I, start_id: LeafId) -> std::ops::Range<LeafId>
+    where
+        I: IntoIterator<Item = Data>,
+        Hasher: StaticDataHasher<Hash, Data>,
+    {
+        let map = |data|Hasher::hash_data_static(data);
+        self.replace_batched(batch.into_iter().map(map), start_id)
+    }
+
+    /// # panic
+    /// * if `start_id` > `last_leaf_id`
+    pub fn replace_batched(&mut self, batch: impl IntoIterator<Item = Hash>, start_id: LeafId) -> std::ops::Range<LeafId> {
+        if start_id > self.last_leaf_id() {
+            panic!("invalid `start_id`")
+        }
+
+        let from = start_id;
+        let mut to = start_id.0;
+
+        let mut ended = false;
+        let mut batch = batch.into_iter();
+        
+        // replacing hashes from batches while they in valid range  
+        for index in start_id.0..self.leaf_elems() {
+            let Some(next_hash) = batch.next() else {
+                ended = true;
+                to = index;
+                break
+            };
+            self.tree_lvls[0][index] = next_hash;
+        }
+
+        // if batch not ended during replacing -- add rest hashes to the end of leaf level
+        if !ended {
+            self.tree_lvls[0].extend(batch);
+            to = self.tree_lvls[0].len();
+        }
+        let to = LeafId::new(to);
+
+        // update hashes on next levels:
         if from != to {
             let mut from = from.0;
             let mut to = to.0;
             let mut lvl = 1;
+            let lvl_must = length_in_base(self.tree_lvls[0].len() - 1, ARITY) as usize + 1;
 
-            while to != 1 {
+            while lvl != lvl_must {
                 if self.tree_lvls.len() <= lvl {
                     let expected_len = (to / ARITY - from / ARITY) + 1;
                     self.tree_lvls.push(Vec::with_capacity(self.new_lvl_cap.max(expected_len)));
@@ -399,8 +452,14 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     }
 
 }
-impl<Hash, Hasher:  ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY>
+impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY>
 {
+    pub fn hash_data_static<Data>(data: Data) -> Hash
+    where Hasher: StaticDataHasher<Hash, Data>
+    {
+        Hasher::hash_data_static(data)
+    }
+
     pub fn hash_data<Data>(&mut self, data: Data) -> Hash
     where Hasher: DataHasher<Hash, Data>
     {

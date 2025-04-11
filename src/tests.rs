@@ -414,9 +414,9 @@ pub fn push_batched_test() {
         tree3.push_data(x);
         tree5.push_data(x);
 
-        assert!(tree2.eq_full(&tree_x2));
-        assert!(tree3.eq_full(&tree_x3));
-        assert!(tree5.eq_full(&tree_x5));
+        assert!(tree2.eq_full(&tree_x2), "x = {x}\n{tree2:?}\n=?=\n{tree_x2:?}");
+        assert!(tree3.eq_full(&tree_x3), "x = {x}");
+        assert!(tree5.eq_full(&tree_x5), "x = {x}");
     }
 
     let vecss = vec![
@@ -496,6 +496,99 @@ pub fn replace_test() {
             assert!(tree3.eq_full(&tree3x));
             assert!(tree5.eq_full(&tree5x));
         }
+    }
+}
+
+#[test]
+pub fn replace_batched_test() {
+    type Hasher = UnsecureHasher; // AddHasher;
+    let mut rng = rand::rng();
+
+    let test = |vec_init: Vec<_>, vec_result: Vec<_>, vec_replaces: Vec<(Vec<_>, _)>| {
+        let mut tree2 = MerkleTree::<u64, Hasher, 2>::new_minimal(Hasher::new());
+        let mut tree3 = MerkleTree::<u64, Hasher, 3>::new_minimal(Hasher::new());
+        let mut tree5 = MerkleTree::<u64, Hasher, 5>::new_minimal(Hasher::new());
+        let mut tree5d = MerkleTree::<u64, Hasher, 5>::new_minimal(Hasher::new());
+        tree2.push_batched(vec_init.clone());
+        tree3.push_batched(vec_init.clone());
+        tree5.push_batched(vec_init.clone());
+        tree5d.push_batched_data(vec_init.clone());
+    
+        for (vec_repl, start_id) in vec_replaces {
+            tree2.replace_batched(vec_repl.clone(), start_id);
+            tree3.replace_batched(vec_repl.clone(), start_id);
+            tree5.replace_batched(vec_repl.clone(), start_id);
+            tree5d.replace_batched_data(vec_repl.clone(), start_id);
+        }
+        
+        let mut tree2x = MerkleTree::<u64, Hasher, 2>::new_minimal(Hasher::new());
+        let mut tree3x = MerkleTree::<u64, Hasher, 3>::new_minimal(Hasher::new());
+        let mut tree5x = MerkleTree::<u64, Hasher, 5>::new_minimal(Hasher::new());
+        let mut tree5xd = MerkleTree::<u64, Hasher, 5>::new_minimal(Hasher::new());
+        tree2x.push_batched(vec_result.clone());
+        tree3x.push_batched(vec_result.clone());
+        tree5x.push_batched(vec_result.clone());
+        tree5xd.push_batched_data(vec_result.clone());
+    
+        assert!(tree3.eq_full(&tree3x));
+        assert!(tree2.eq_full(&tree2x));
+        assert!(tree5.eq_full(&tree5x));
+        assert!(tree5d.eq_full(&tree5xd));
+    };
+
+    let vec_in_ = to_vec_u64("0 1 2 | 3 4 5 | 6  7  8 ||  9 10 11 | 12 13 14 | 15 16 _ ||");
+    let vec_out = to_vec_u64("0 1 2 | 3 4 5 | 6 37 38 || 39 30 31 | 32 33 14 | 15 16 _ ||");
+    let replaces = vec![(vec![37, 38, 39, 30, 31, 32, 33], LeafId::new(7))];
+    test(vec_in_, vec_out, replaces);
+    
+    let vec_in_ = to_vec_u64("0 1 2 ");
+    let vec_out = to_vec_u64("0 1 2 | 3 4 5 | 6");
+    let replaces = vec![(vec![3, 4, 5, 6], LeafId::new(3))];
+    test(vec_in_, vec_out, replaces);
+    
+    let vec_in_ = to_vec_u64("0 1 2 | 3 4 5 | 6 7 8 ||  9 10 11 | 12 13 14 |  15  16   _ ||");
+    let vec_out = to_vec_u64("0 1 2 | 3 4 5 | 6 7 8 || 39 30 31 | 32 33 14 | 105 106 107 || 108 109 _ |");
+    let replaces = vec![
+        (vec![39, 30, 31, 32, 33], LeafId::new(9)),
+        (vec![105, 106, 107, 108, 109], LeafId::new(15)),
+    ];
+    test(vec_in_, vec_out, replaces);
+    let vec_in_ = to_vec_u64("0 1  2 |  3  4  5 |  6  7  8 ||  9 10 11 | 12 13 14 | 15 16 _ ||");
+    let vec_out = to_vec_u64("0 1 52 | 53 54 55 | 56 37 38 || 39 40 41 | 42 43 14 | 15 16 _ ||");
+    let replaces = vec![
+        (vec![37, 38, 39, 30, 31, 32, 33], LeafId::new(7)),
+        (vec![40, 41, 42, 43], LeafId::new(10)),
+        (vec![], LeafId::new(13)),
+        (vec![], LeafId::new(17)),
+        (vec![52, 53, 54, 55, 56], LeafId::new(2)),
+        (vec![], LeafId::new(11)),
+    ];
+    test(vec_in_, vec_out, replaces);
+
+    // random test:
+    for _repeats in 0..20 {
+        let vec_in: Vec<_> = (0..rng.random_range(12..=123)).map(|_|rng.next_u64()).collect();
+        let mut vec_out = vec_in.clone();
+        let mut replaces = vec![];
+        for _ in 0..rng.random_range(1..=7) {
+            let v: Vec<_> = (0..rng.random_range(0..=17)).map(|_|rng.next_u64()).collect();
+            let id = rng.random_range(0..=vec_out.len());
+
+            let mut v_index = 0;
+            for index in id..vec_out.len() {
+                if v_index < v.len() {
+                    vec_out[index] = v[v_index];
+                    v_index += 1;
+                } else {
+                    break;
+                }
+            }
+            vec_out.extend_from_slice(&v[v_index..]);
+
+            replaces.push((v, LeafId::new(id)));
+        }
+
+        test(vec_in, vec_out, replaces);    
     }
 }
 

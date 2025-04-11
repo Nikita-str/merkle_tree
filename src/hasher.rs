@@ -25,6 +25,12 @@ pub trait MtDataHasher<Hash, Data> {
     fn hash_data(&mut self, data: Data) -> Hash;
 }
 
+/// `Mt` stands for `MerkleTree`
+/// 
+/// Static data hasher that doesn't need `&mut self`
+pub trait MtDataHasherStatic<Hash, Data>: MtDataHasher<Hash, Data> {
+    fn hash_data_static(data: Data) -> Hash;
+}
 
 #[cfg(any(feature = "unsecure", test))]
 #[derive(Debug)]
@@ -56,5 +62,12 @@ impl<Data: std::hash::Hash> MtDataHasher<u64, Data> for UnsecureHasher {
     fn hash_data(&mut self, data: Data) -> u64 {
         data.hash(&mut self.inner);
         self.finish()
+    }
+}
+
+#[cfg(any(feature = "unsecure", test))]
+impl<Data: std::hash::Hash> MtDataHasherStatic<u64, Data> for UnsecureHasher {
+    fn hash_data_static(data: Data) -> u64 {
+        Self::new().hash_data(data)
     }
 }
