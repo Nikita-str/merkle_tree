@@ -4,12 +4,66 @@ use std::hash::DefaultHasher as StdHasher;
 pub trait MtHasher<Hash> {
     fn hash_one_ref(&mut self, hash: &Hash);
     fn finish(&mut self) -> Hash;
+    
+    /// Test if two hashers are equal.
+    /// 
+    /// **For most cases shuld just return true:**
+    /// ```ignore
+    /// fn is_the_same(&self, _: &Self) -> bool {
+    ///     true
+    /// }
+    /// ``` 
+    /// Needs another impl if Hasher itself contains parameters
+    /// that changes result of hash function.
+    /// 
+    /// # Example
+    /// If your hasher have additional data that change resulted hash itself:
+    /// ```ignore
+    /// struct HasherWithPrefix {
+    ///     data_prefix: Vec<u8>,
+    ///     hasher_sha256,
+    /// } 
+    /// ```
+    /// You need impl this funcrion as next:
+    /// ```ignore
+    /// fn is_the_same(&self, other: &Self) -> bool {
+    ///     self.data_prefix == other.data_prefix
+    /// }
+    /// ```
+    fn is_the_same(&self, other: &Self) -> bool; 
 }
 
 /// `Mt` stands for `MerkleTree`
 pub trait MtArityHasher<Hash, const ARITY: usize> {
     fn hash_arity_one_ref(&mut self, hash: &Hash);
     fn finish_arity(&mut self) -> Hash;
+    
+    /// Test if two hashers are equal.
+    /// 
+    /// **For most cases shuld just return true:**
+    /// ```ignore
+    /// fn is_the_same(&self, _: &Self) -> bool {
+    ///     true
+    /// }
+    /// ``` 
+    /// Needs another impl if Hasher itself contains parameters
+    /// that changes result of hash function.
+    /// 
+    /// # Example
+    /// If your hasher have additional data that change resulted hash itself:
+    /// ```ignore
+    /// struct HasherWithPrefix {
+    ///     data_prefix: Vec<u8>,
+    ///     hasher_sha256,
+    /// } 
+    /// ```
+    /// You need impl this funcrion as next:
+    /// ```ignore
+    /// fn is_the_same(&self, other: &Self) -> bool {
+    ///     self.data_prefix == other.data_prefix
+    /// }
+    /// ```
+    fn is_the_same(&self, other: &Self) -> bool; 
 }
 impl<Hasher: MtHasher<Hash>, Hash, const ARITY: usize> MtArityHasher<Hash, ARITY> for Hasher {
     fn hash_arity_one_ref(&mut self, hash: &Hash) {
@@ -17,6 +71,9 @@ impl<Hasher: MtHasher<Hash>, Hash, const ARITY: usize> MtArityHasher<Hash, ARITY
     }
     fn finish_arity(&mut self) -> Hash {
         self.finish()
+    }
+    fn is_the_same(&self, other: &Self) -> bool {
+        self.is_the_same(other)
     }
 }
 
@@ -54,6 +111,9 @@ impl MtHasher<u64> for UnsecureHasher {
         let ret = std::hash::Hasher::finish(&self.inner);
         self.inner = StdHasher::new();
         ret
+    }
+    fn is_the_same(&self, _: &Self) -> bool {
+        true
     }
 }
 

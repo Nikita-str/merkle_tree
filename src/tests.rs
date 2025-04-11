@@ -628,6 +628,9 @@ impl crate::MtHasher<u64> for AddHasher {
         self.acc = 0;
         ret
     }
+    fn is_the_same(&self, _: &Self) -> bool {
+        true
+    }
 }
 impl crate::MtDataHasher<u64, u64> for AddHasher {
     fn hash_data(&mut self, data: u64) -> u64 {
