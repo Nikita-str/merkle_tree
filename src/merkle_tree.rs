@@ -73,7 +73,7 @@ impl<'mt_ref, Hash: Eq, const ARITY: usize> PartialEq for MtLvl<'mt_ref, Hash, A
         let b_len = b.len();
 
         if a_len != b_len {
-            // in this case tree have different height
+            // if  arity_lens non equal => tree have different height
             let arity_len = length_in_base(a_len - 1, ARITY);
             if arity_len != length_in_base(b_len - 1, ARITY) { return false }
             assert_ne!(arity_len, 0, "when arity is 0 a_len must be equal b_len");
@@ -167,11 +167,42 @@ pub struct MerkleTree<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize
     new_lvl_cap: usize,
     phantom: PhantomData<Hasher>,
 }
-impl<Hash: Eq, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> Eq for MerkleTree<Hash, Hasher, ARITY> { }
-impl<Hash: Eq, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> PartialEq for MerkleTree<Hash, Hasher, ARITY> {
-    /// ⚠️ tests only equality of trees itself
-    /// (don't test that the hashers are the same, in case if hasher rely on some private arg)
-    fn eq(&self, b: &Self) -> bool {
+// TODO: write batched
+// TODO: merge
+// TODO: split (need clone for Hasher & Hash)
+
+impl<Hash: Eq, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {
+    /// Test equality of two trees by comparing only equality of height and root.\
+    /// In most case it is enough.
+    /// 
+    /// In most cases, you should wrap `MerkleTree` with concrete generic args & 
+    /// impl [`Eq`] trait with suitable eq fn: \
+    /// See also [`Self::eq_full`] & [`Self::eq_full_with_hasher`]
+    pub fn eq_weak(&self, other: &Self) -> bool {
+        if self.is_empty() { return other.is_empty() }
+
+        let height_eq = self.height() == other.height();
+        let root_eq = self.root_ref() == other.root_ref();
+        height_eq && root_eq
+    }
+    /// Test non-equality of two trees by comparing only equality of height and root.\
+    /// In most case it is enough.
+    /// 
+    /// # Guarantees
+    /// Always the same as `!self.eq_weak(other)` 
+    pub fn ne_weak(&self, other: &Self) -> bool {
+        !self.eq_weak(other)
+    }
+    
+    /// Test equality of two trees by comparing all levels.\
+    /// ⚠️ Doesn't comapre that the hashers are the same (in case if hasher rely on some private arg)
+    /// 
+    /// At least needs for tests
+    /// 
+    /// In most cases, you should wrap `MerkleTree` with concrete generic args & 
+    /// impl [`Eq`] trait with suitable eq fn: \
+    /// See also [`Self::eq_weak`] & [`Self::eq_full_with_hasher`]
+    pub fn eq_full(&self, b: &Self) -> bool {
         let a = self; 
         if a.height() != b.height() { return false }
 
@@ -181,11 +212,41 @@ impl<Hash: Eq, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> PartialEq f
 
         return true;
     }
+    /// Test non-equality of two trees by comparing all levels.\
+    /// ⚠️ Doesn't comapre that the hashers are the same (in case if hasher rely on some private arg)
+    /// 
+    /// # Guarantees
+    /// Always the same as `!self.eq_full(other)` 
+    pub fn ne_full(&self, other: &Self) -> bool {
+        !self.eq_full(other)
+    }
 }
-// TODO: write batched
-// TODO: merge
-// TODO: split (need clone for Hasher & Hash)
+impl<Hash: Eq, Hasher: ArityHasher<Hash, ARITY> + Eq, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {
+    /// Test equality of two trees by comparing all levels & that hashers are the same.
+    /// 
+    /// In most cases, you should wrap `MerkleTree` with concrete generic args & 
+    /// impl [`Eq`] trait with suitable eq fn: \
+    /// See also [`Self::eq_weak`] & [`Self::eq_full`]
+    pub fn eq_full_with_hasher(&self, b: &Self) -> bool {
+        (self.hasher == b.hasher) && self.eq_full(b)
+    }
+    /// Test non-equality of two trees by comparing all levels & that hashers are the same.
+    /// 
+    /// # Guarantees
+    /// Always the same as `!self.eq_full_with_hasher(other)` 
+    pub fn ne_full_with_hasher(&self, other: &Self) -> bool {
+        !self.eq_full_with_hasher(other)
+    }
+}
 
+impl<Hash: Clone, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {
+    /// # panic
+    /// * if `self.is_empty()`
+    #[inline]
+    pub fn root(&self) -> Hash {
+        self.tree_lvls[self.height() - 1][0].clone()
+    }
+}
 impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {
     // TODO: new_capacity / new_height
     pub fn new_minimal(hasher: Hasher) -> Self {
@@ -199,6 +260,12 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
         }
     }
 
+    /// # panic
+    /// * if `self.is_empty()`
+    #[inline]
+    pub fn root_ref(&self) -> &Hash {
+        &self.tree_lvls[self.height() - 1][0]
+    }
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.tree_lvls[0].is_empty()

@@ -222,14 +222,14 @@ fn unsecure_mt_eq_test() {
     let a = get_initiated_tree::<3>(&[1, 2, 3, 4, 5]);
 
     let assert = |b| {
-        assert_eq!(a, b, "a = b test");
-        assert_eq!(b, a, "b = a test");
+        assert!(a.eq_full(&b), "a = b test");
+        assert!(b.eq_full(&a), "b = a test");
         for lvl in 0..b.height() {
             assert_eq!(a.get_lvl(lvl), b.get_lvl(lvl), "lvl {lvl} test");
         }
         non_eq.iter().for_each(|x|{
-            assert_ne!(x, &b, "x != b test");
-            assert_ne!(&b, x, "b != x test");
+            assert!(x.ne_full(&b), "x != b test");
+            assert!(&b.ne_full(&x), "b != x test");
             assert_ne!(b.get_lvl(0), x.get_lvl(0), "non eq lvl 0 test");
         });
     };
@@ -264,8 +264,8 @@ fn unsecure_mt_eq_test() {
         8, 7, 6, 9, 3, 3, 9, 3, 3,
     ];
     let b = get_initiated_tree::<3>(&b);
-    assert_eq!(a, b);
-    assert_eq!(b, a);
+    assert!(a.eq_full(&b));
+    assert!(b.eq_full(&a));
 
     let not_eq: &[&[_]] = &[
         &[
@@ -291,10 +291,10 @@ fn unsecure_mt_eq_test() {
     ];
     let not_eq: Vec<_> = not_eq.iter().map(|x|get_initiated_tree::<3>(x)).collect();
     for ne in &not_eq {
-        assert_ne!(&a, ne);
-        assert_ne!(&b, ne);
-        assert_ne!(ne, &b);
-        assert_ne!(ne, &a);
+        assert!(a.ne_full(ne));
+        assert!(b.ne_full(ne));
+        assert!(ne.ne_full(&b));
+        assert!(ne.ne_full(&a));
     }
     not_eq.iter().for_each(|not_eq|{
         assert_ne!(a.get_lvl(0), not_eq.get_lvl(0), "non eq lvl 0 test");
@@ -307,11 +307,11 @@ fn unsecure_mt_eq_test() {
         8, 7, 6, 9, 3, 3
     ];
     let b = get_initiated_tree::<3>(&b);
-    assert_eq!(a, b);
-    assert_eq!(b, a);
+    assert!(a.eq_full(&b));
+    assert!(b.eq_full(&a));
     for ne in &not_eq {
-        assert_ne!(&b, ne);
-        assert_ne!(ne, &b);
+        assert!(b.ne_full(ne));
+        assert!(ne.ne_full(&b));
     }
     not_eq.iter().for_each(|not_eq|{
         assert_ne!(a.get_lvl(0), not_eq.get_lvl(0), "non eq lvl 0 test");
