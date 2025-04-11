@@ -1,6 +1,6 @@
+use std::str::FromStr;
 use rand::RngCore;
-
-use crate::{MerkleTree, UnsecureHasher};
+use crate::{merkle_tree::MtLvl, MerkleTree, UnsecureHasher};
 
 fn unsecure_hash(x: u64) -> u64 {
     let mut hasher = std::hash::DefaultHasher::new();
@@ -99,6 +99,95 @@ fn unsecure_mt_push_test() {
             lvl += 1;
         }
     }
+}
+
+pub fn to_vec<T: FromStr>(s: &str) -> Vec<T>
+where <T as FromStr>::Err: std::fmt::Debug
+{
+    let s = s.replace('|', "");
+    let s = s.replace('_', "");
+    let s = s.replace("..", "");
+    s.split(" ")
+        .filter(|x|!x.is_empty())
+        .map(|s|str::parse::<T>(s).unwrap())
+        .collect::<Vec<_>>()
+}
+
+pub fn to_vec_u64(s: &str) -> Vec<u64> {
+    to_vec(s)
+}
+
+#[test]
+fn aux_test_to_vec() {
+    assert_eq!(
+        to_vec_u64("6 7 7 | 6 7 7 | 6 7 8 ||"), 
+        vec![6, 7, 7, 6, 7, 7, 6, 7, 8]
+    );
+    assert_eq!(
+        to_vec_u64("0 1 2 | 3 4 5 | 4 5 5 || 6 7 8 |"), 
+        vec![0, 1, 2, 3, 4, 5, 4, 5, 5, 6, 7, 8]
+    );
+    assert_eq!(to_vec_u64("1 2 _ _ _ _"), vec![1, 2, ]);
+    assert_eq!(to_vec_u64("1 2 2 2 2 2"), vec![1, 2, 2, 2, 2, 2]);
+    assert_eq!(to_vec_u64("1 2 2 2 2 2 | _ _ _ _ _ _ | .."), vec![1, 2, 2, 2, 2, 2]);
+}
+
+
+#[test]
+fn unsecure_mt_lvl_eq_test() {
+    fn test<const ARITY: usize>(a: &Vec<u64>, b: &Vec<u64>, eq: bool) {
+        let a = MtLvl::<_, ARITY>::new(&a);
+        let b = MtLvl::<_, ARITY>::new(&b);
+        if eq {
+            assert_eq!(a, b);
+            assert_eq!(b, a);
+        } else {
+            assert_ne!(a, b);
+            assert_ne!(b, a);
+        }
+    }
+
+    let a = to_vec_u64("1 2 3 | 4");
+    let b = to_vec_u64("1 2 3 | 4 4 4");
+    test::<3>(&a, &b, true);
+
+    let a = to_vec_u64("1 2 3 4 5 | 7 8");
+    let b = to_vec_u64("1 2 3 4 5 | 7 8 8 8 8 | 7 8 8 8 8 | 7 8 8");
+    test::<5>(&a, &b, true);
+
+    let a = to_vec_u64("1 2 3 4 5 | 7 8");
+    let b = to_vec_u64("1 2 3 4 5 | 7 8 8 8 8 | 7 8");
+    test::<5>(&a, &b, true);
+
+    
+    let a = to_vec_u64("1 2 _ _ _ _");
+    let b = to_vec_u64("1 2 2 2 2 2");
+    test::<6>(&a, &b, true);
+    
+    let a = to_vec_u64("1 2 3 | 4 5 5 | _ _ _");
+    let b = to_vec_u64("1 2 3 | 4 5 5 | 4 _ _");
+    test::<3>(&a, &b, false);
+    
+    let a = to_vec_u64("6 7 7 | 6 7 7 | 6 7 8 || 6 7 7 | 6 7 7 | 6 7 8 || ");
+    let b = to_vec_u64("6 7 7 | 6 7 7 | 6 7 8 || 6 7 7 | 6 7 7 | 6 7 8 || 6 7 7 | ");
+    test::<3>(&a, &b, false);
+    let a = to_vec_u64("6 7 7 | 6 7 7 | 6 7 8 || 6 7 7 | 6 7 7 | 6 7 7 || ");
+    test::<3>(&a, &b, false);
+    let b = to_vec_u64("6 7 7 | 6 7 7 | 6 7 8 || 6 7 7 | 6 7 7 | 6 7 7 || 6 7 7 | ");
+    test::<3>(&a, &b, true);
+
+    let a = to_vec_u64("1 2 3 | 4 5 5 | 3 2 1 || 7 7 7 | 7 7 7 | 7 7 8 || ");
+    let b = to_vec_u64("1 2 3 | 4 5 5 | 3 2 1 || 7 7 7 | 7 7 7 | 7 7 8 || 7");
+    test::<3>(&a, &b, false);
+    let a = to_vec_u64("1 2 3 | 4 5 5 | 3 2 1 || 7 7 7 | 7 7 7 | 7 7 7 || ");
+    let b = to_vec_u64("1 2 3 | 4 5 5 | 3 2 1 || 7 7 7 | 7 7 7 | 7 7 7 || 7");
+    test::<3>(&a, &b, true);
+    let a = to_vec_u64("1 2 3 | 4 5 5 | 3 2 1 || 7 7 7 | 7 7 7 | 7 8 7 || ");
+    let b = to_vec_u64("1 2 3 | 4 5 5 | 3 2 1 || 7 7 7 | 7 7 7 | 7 8 7 || 7");
+    test::<3>(&a, &b, false);
+    let a = to_vec_u64("1 2 3 | 4 5 5 | 3 2 1 || 7 7 7 | 7 7 8 | 7 7 7 || ");
+    let b = to_vec_u64("1 2 3 | 4 5 5 | 3 2 1 || 7 7 7 | 7 7 8 | 7 7 7 || 7");
+    test::<3>(&a, &b, false);
 }
 
 #[test]
@@ -228,4 +317,21 @@ fn unsecure_mt_eq_test() {
         assert_ne!(a.get_lvl(0), not_eq.get_lvl(0), "non eq lvl 0 test");
         assert_ne!(b.get_lvl(0), not_eq.get_lvl(0), "non eq lvl 0 test");
     });
+}
+
+#[cfg(test)]
+#[test]
+fn vec_continuation_test() {
+    let a = to_vec_u64("7 7 5| 5 5 7 | 9 8 7 || 1 2 3 | 4 5 _ | _ _ _");
+    let b = to_vec_u64("7 7 5| 5 5 7 | 9 8 7 || 1 2 3 | 4 5 5 | 4 5 5 || 1 2 3 | 4 5 5 | 4 5 5");
+    assert_eq!(MtLvl::<_, 3>::vec_continuation(a), b);
+    
+    let a = to_vec_u64("1 2");
+    let b = to_vec_u64("1 2 2 2 2 2");
+    assert_eq!(MtLvl::<_, 6>::vec_continuation(a), b);
+    
+    let a = to_vec_u64("1 2 3 4 5 6 | 9 8 7");
+    let mut b = to_vec_u64("1 2 3 4 5 6");
+    b.extend(to_vec_u64("9 8 7 7 7 7").repeat(5));
+    assert_eq!(MtLvl::<_, 6>::vec_continuation(a), b);
 }
