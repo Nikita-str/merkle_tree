@@ -66,6 +66,8 @@ pub fn get_pad_index(mut index: usize, mut max_valid_index: usize, arity: usize)
     head + tail
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 #[cfg(test)]
 mod tests {
     use super::*;

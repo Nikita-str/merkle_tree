@@ -9,7 +9,38 @@ struct MerkleTreePath {
     bin_path: Vec<u8>, // TODO: SmallVec
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// [+] Merkle Tree Level
+
 /// `Mt` stands for `MerkleTree`
+/// 
+/// Structure that test equality of levels.\
+/// # Examples
+/// Next levels are equal:
+/// ```txt
+/// 1A. || 9 8 7 | 7 8 9 | 9 1 9 || 0 1 2 | 3 4
+/// 1B. || 9 8 7 | 7 8 9 | 9 1 9 || 0 1 2 | 3 4 4 | 3 4 4 ||
+/// 1C. || 9 8 7 | 7 8 9 | 9 1 9 || 0 1 2 | 3 4 4 | 3 4 4 || 0 1 2 | 3 4 4 | 3 4 4 ||
+/// 
+/// 2A. || 1 2 3 | 4 5 6 | 0 0 5 || 7 7 7 | 7 7 7| 7 7 7 ||  
+/// 2B. || 1 2 3 | 4 5 6 | 0 0 5 || 7 7 7 | 7 7 7| 7 7 7 || 7 
+/// because they both will be equal to: 
+/// 2(equal). || 1 2 3 | 4 5 6 | 0 0 5 || 7 7 7 | 7 7 7| 7 7 7 || 7 7 7 | 7 7 7| 7 7 7 ||
+/// ```
+/// And next are **not** equal:
+/// ```txt
+/// 1A. || 9 8 7 | 7 8 9 | 9 1 9 || 0 1 2 | 3 4       !
+/// 1B. || 9 8 7 | 7 8 9 | 9 1 9 || 0 1 2 | 3 4 4 | 3 3 4 ||
+/// because they will be equal to: 
+/// 1A(equal). || 9 8 7 | 7 8 9 | 9 1 9 || 0 1 2 | 3 4 4 | 3 3 4 ||
+/// 1B(equal). || 9 8 7 | 7 8 9 | 9 1 9 || 0 1 2 | 3 4 4 | 3 3 4 ||
+/// 
+/// 2A. || 1 2 3 | 4 5 6 | 0 0 5 || 7 7 7 | 7 7 7| 7 8 7 ||  
+/// 2B. || 1 2 3 | 4 5 6 | 0 0 5 || 7 7 7 | 7 7 7| 7 8 7 || 7 
+/// because they will be equal to: 
+/// 2A(equal). || 1 2 3 | 4 5 6 | 0 0 5 || 7 7 7 | 7 7 7| 7 8 7 || 7 7 7 | 7 7 7| 7 8 7 ||
+/// 2B(equal). || 1 2 3 | 4 5 6 | 0 0 5 || 7 7 7 | 7 7 7| 7 8 7 || 7 7 7 | 7 7 7| 7 7 7 ||
+/// ```
 #[derive(Clone, Copy, Debug)]
 pub struct MtLvl<'mt_ref, Hash, const ARITY: usize> {
     lvl: Option<&'mt_ref Vec<Hash>>,
@@ -153,6 +184,9 @@ impl<'mt_ref, Hash: Eq, const ARITY: usize> PartialEq for MtLvl<'mt_ref, Hash, A
     }
 }
 
+// [-] Merkle Tree Level
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LeafId(usize);
 impl LeafId {
@@ -171,8 +205,11 @@ pub struct MerkleTree<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize
     new_lvl_cap: usize,
     phantom: PhantomData<Hasher>,
 }
-// TODO: get lvl
 // TODO: split (need clone for Hasher & Hash)
+// TODO: ? split storage by max level (& create next tree by getting slice) --> parent structure MerkleTreeLevelSlice;
+//       | & MerkleTree is MerkleTreeLevelSlice(None)
+//       | annoying things here is comment & fns def copy-paste
+//       | but it can be used for very big `MerkleTree`s
 
 impl<Hash: Eq, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {
     /// Test equality of two trees by comparing only equality of height and root.\
@@ -265,15 +302,24 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     }
     #[inline]
     pub fn height(&self) -> usize {
+        if self.is_empty() { return 0 }
         self.tree_lvls.len()
     }
     #[inline]
-    fn leaf_elems(&self) -> usize {
-        self.tree_lvls[0].len()
+    fn leaf_amount(&self) -> usize {
+        // never panic becasue `tree_lvls[0]` always defined
+        self.lvl_len(0)
     }
     #[inline]
-    fn last_leaf_id(&self) -> LeafId {
-        LeafId(self.tree_lvls[0].len())
+    fn next_leaf_id(&self) -> LeafId {
+        // never panic becasue `tree_lvls[0]` always defined
+        LeafId(self.lvl_len(0))
+    }
+    /// # painc
+    /// * if `lvl >= self.height()`
+    #[inline]
+    fn lvl_len(&self, lvl: usize) -> usize {
+        self.tree_lvls[lvl].len()
     }
 
     /// Return requested level of tree.
@@ -290,10 +336,14 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     }
 
     pub fn valid_leaf_id(&self, id: LeafId) -> bool {
-        id.0 < self.leaf_elems()
+        id.0 < self.leaf_amount()
     }
 }
 impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {
+    fn lvl_must(&self) -> usize {
+        length_in_base(self.tree_lvls[0].len() - 1, ARITY) as usize + 1
+    }
+
     fn make_lvl_valid(&mut self, lvl: usize, expected_len: usize) {
         if self.tree_lvls.len() <= lvl {
             self.tree_lvls.push(Vec::with_capacity(self.new_lvl_cap.max(expected_len)));
@@ -380,16 +430,16 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     /// [`Self::push_batched`] & [`Self::push_batched_data`] 
     /// they are faster.
     pub fn push(&mut self, hash: Hash) -> LeafId {
-        if self.leaf_elems() == self.add_lvl_sz {
+        if self.leaf_amount() == self.add_lvl_sz {
             self.add_lvl_sz *= ARITY;
             self.tree_lvls.push(Vec::with_capacity(self.new_lvl_cap));
         }
 
-        let elem_n = self.leaf_elems();
+        let elem_n = self.leaf_amount();
         self.tree_lvls[0].push(hash);
         self.recalc_elem_hashes(elem_n);
 
-        LeafId::new(self.tree_lvls[0].len() - 1)
+        LeafId::new(self.leaf_amount() - 1)
     }
 
     /// Replace a leaf.
@@ -426,7 +476,7 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     /// 
     /// If you need push batch of data you can use [`Self::push_batched_data`]
     pub fn push_batched(&mut self, batch: impl IntoIterator<Item = Hash>) -> std::ops::Range<LeafId> {
-        self.replace_batched(batch, self.last_leaf_id())
+        self.replace_batched(batch, self.next_leaf_id())
     }
 
     /// Replace batch of leafs by hashing data.\
@@ -452,7 +502,7 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     /// # panic
     /// * if `start_id` > `last_leaf_id`
     pub fn replace_batched(&mut self, batch: impl IntoIterator<Item = Hash>, start_id: LeafId) -> std::ops::Range<LeafId> {
-        if start_id > self.last_leaf_id() {
+        if start_id > self.next_leaf_id() {
             panic!("invalid `start_id`")
         }
 
@@ -463,7 +513,7 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
         let mut batch = batch.into_iter();
         
         // replacing hashes from batches while they in valid range  
-        for index in start_id.0..self.leaf_elems() {
+        for index in start_id.0..self.leaf_amount() {
             let Some(next_hash) = batch.next() else {
                 ended = true;
                 to = index;
@@ -475,7 +525,7 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
         // if batch not ended during replacing -- add rest hashes to the end of leaf level
         if !ended {
             self.tree_lvls[0].extend(batch);
-            to = self.tree_lvls[0].len();
+            to = self.leaf_amount();
         }
         let to = LeafId::new(to);
 
@@ -484,7 +534,7 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
             let mut from = from.0;
             let mut to = to.0;
             let mut lvl = 1;
-            let lvl_must = length_in_base(self.tree_lvls[0].len() - 1, ARITY) as usize + 1;
+            let lvl_must = self.lvl_must();
 
             while lvl != lvl_must {
                 self.make_lvl_valid(lvl, (to / ARITY - from / ARITY) + 1);
@@ -527,7 +577,7 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     /// * [`Some`] of merged tree otherwise
     pub fn merge(&mut self, iter: impl IntoIterator<Item = Self>) {
         for other in iter {
-            if other.leaf_elems() == 0 { continue }
+            if other.leaf_amount() == 0 { continue }
             let other_height = other.height();
 
             let mut recalc_index: Option<usize> = None;
@@ -535,11 +585,11 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
                 self.make_lvl_valid(lvl, tree_lvl.len());
                 
                 if let Some(from_index) = recalc_index {
-                    let pre_lvl_range = from_index..self.tree_lvls[lvl - 1].len();
+                    let pre_lvl_range = from_index..self.lvl_len(lvl - 1);
                     self.calc_lvl_hashes(pre_lvl_range, lvl);
                     recalc_index = Some(from_index / ARITY);
                 } else {
-                    let left_len = self.tree_lvls[lvl].len();
+                    let left_len = self.lvl_len(lvl);
                     self.tree_lvls[lvl].extend(tree_lvl);
                     if left_len % ARITY != 0 {
                         recalc_index = Some(left_len);
@@ -548,13 +598,10 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
             }
 
             // now calc top if needed
-            let leafs_amount = self.leaf_elems();
-            if leafs_amount == 0 { continue }
-
             let mut recalc_index = recalc_index.unwrap_or(0);
-            let lvl_must = length_in_base(leafs_amount - 1, ARITY) as usize + 1;
+            let lvl_must = self.lvl_must();
             for lvl in other_height..lvl_must {
-                let pre_lvl_len = self.tree_lvls[lvl - 1].len();
+                let pre_lvl_len = self.lvl_len(lvl - 1);
                 self.make_lvl_valid(lvl,  pre_lvl_len / ARITY);
                 
                 let pre_lvl_range = recalc_index..pre_lvl_len;
