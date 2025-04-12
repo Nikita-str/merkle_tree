@@ -90,7 +90,7 @@ pub trait MtDataHasherStatic<Hash, Data>: MtDataHasher<Hash, Data> {
 }
 
 #[cfg(any(feature = "unsecure", test))]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UnsecureHasher {
     inner: StdHasher,
 }

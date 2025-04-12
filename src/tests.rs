@@ -592,11 +592,98 @@ pub fn replace_batched_test() {
     }
 }
 
+
+#[test]
+pub fn merge_test() {
+    type Hasher = UnsecureHasher; // AddHasher;
+    let mut rng = rand::rng();
+
+    let test_2 = |a: Vec<_>, b: Vec<_>| {
+        let a_tree = MerkleTree::<_, _, 3>::new_from_leafs(Hasher::new(), a.clone());
+        let b_tree = MerkleTree::<_, _, 3>::new_from_leafs(Hasher::new(), b.clone());
+    
+        let merged = MerkleTree::new_merged([a_tree, b_tree]).unwrap();
+        
+        let mut ab = a.clone();
+        ab.extend(b.clone());
+        let expected = MerkleTree::<_, _, 3>::new_from_leafs(Hasher::new(), ab);
+    
+        assert!(expected.eq_full(&merged), "{expected:?}\n=?=\n{merged:?}\n");
+    };
+
+    let a_tree = MerkleTree::<_, _, 3>::new_from_leafs(Hasher::new(), vec![]);
+    let b_tree = MerkleTree::<_, _, 3>::new_from_leafs(Hasher::new(), vec![]);
+    let merged = MerkleTree::new_merged([a_tree.clone(), b_tree.clone()]).unwrap();
+    assert!(merged.is_empty());
+    let c = to_vec_u64("0 1 2 | 4 ..");
+    let c_tree = MerkleTree::<_, _, 3>::new_from_leafs(Hasher::new(), c);
+    let merged = MerkleTree::new_merged([a_tree.clone(), c_tree.clone(), b_tree.clone()]).unwrap();
+    assert!(c_tree.eq_full(&merged));
+
+    let a = to_vec_u64("0 1 2 | ..");
+    let b = to_vec_u64("3 4 5 | 6 7 8 | 9 10 11");
+    test_2(a.clone(), b.clone());
+    test_2(b, a);
+
+    let a = to_vec_u64("0 1 2 | 4 5 ..");
+    let b = to_vec_u64("6 7 8 | 9 10 11 | 12 13 _");
+    test_2(a.clone(), b.clone());
+    test_2(b, a);
+    
+    let a = to_vec_u64("0 1 2 | 3 4 5 | 6");
+    let b = to_vec_u64(" 7 8 || 9 10 11 | 12 13 14 | 15 16 17 ||");
+    test_2(a.clone(), b.clone());
+    test_2(b, a);
+
+    let mut vecss = vec![
+        vec![(1..=9).collect::<Vec<u64>>(), (10..=19).collect(), (20..=29).collect()],
+        vec![(1..=9).collect(), (1 + 10..=27 + 10).collect(), (1 + 100..=27*2 + 100).collect()],
+        vec![(1 + 10..=27 + 10).collect(), (1..=9).collect(), (1 + 100..=27*2 + 100).collect(), (200..=213).collect()],
+    ];
+    // generate random test:
+    for _repeats in 0..20 {
+        let mut v = vec![];
+        for _ in 0..rng.random_range(2..=7) {
+            let x: Vec<_> = (0..rng.random_range(1..=45)).map(|_|rng.next_u64()).collect();
+            v.push(x);
+        }
+        vecss.push(v);
+    }
+
+    for vecs in vecss {
+        let trees2 = vecs.clone().into_iter().map(
+            |x|MerkleTree::<_, _, 2>::new_from_leafs(Hasher::new(), x)
+        );
+        let trees3 = vecs.clone().into_iter().map(
+            |x|MerkleTree::<_, _, 3>::new_from_leafs(Hasher::new(), x)
+        );
+        let trees5 = vecs.clone().into_iter().map(
+            |x|MerkleTree::<_, _, 5>::new_from_leafs(Hasher::new(), x)
+        );
+        let merged2 = MerkleTree::new_merged(trees2).unwrap();
+        let merged3 = MerkleTree::new_merged(trees3).unwrap();
+        let merged5 = MerkleTree::new_merged(trees5).unwrap();
+        
+        let mut expected_leafs = vec![];
+        for vec in vecs {
+            expected_leafs.extend(vec);
+        }
+        let exp = expected_leafs;
+        let expected2 = MerkleTree::<_, _, 2>::new_from_leafs(Hasher::new(), exp.clone());
+        let expected3 = MerkleTree::<_, _, 3>::new_from_leafs(Hasher::new(), exp.clone());
+        let expected5 = MerkleTree::<_, _, 5>::new_from_leafs(Hasher::new(), exp.clone());
+    
+        assert!(expected2.eq_full(&merged2), "{expected2:?}\n=?=\n{merged2:?}\n");
+        assert!(expected3.eq_full(&merged3), "{expected3:?}\n=?=\n{merged3:?}\n");
+        assert!(expected5.eq_full(&merged5), "{expected5:?}\n=?=\n{merged5:?}\n");
+    }
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // [+] AddHasher
 
 /// ⛔ It is TOTALY INCORRECT HASH that used only for tests
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct AddHasher {
     acc: u64,
 }
@@ -621,7 +708,7 @@ impl AddHasher {
 #[cfg(any(feature = "unsecure", test))]
 impl crate::MtHasher<u64> for AddHasher {
     fn hash_one_ref(&mut self, hash: &u64) {
-        self.acc += *hash;
+        self.acc = u64::wrapping_add(self.acc, *hash);
     }
     fn finish(&mut self) -> u64 {
         let ret = self.acc;

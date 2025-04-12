@@ -1,4 +1,5 @@
 use std::marker::PhantomData;
+use std::ops::Range;
 use crate::utility::{get_pad_index, length_in_base};
 use crate::MtArityHasher as ArityHasher;
 use crate::MtDataHasher as DataHasher;
@@ -105,7 +106,6 @@ impl<'mt_ref, Hash: Eq, const ARITY: usize> PartialEq for MtLvl<'mt_ref, Hash, A
                         let l_index = l_index + j;
                         let r_index = r_index + j;
 
-                        // println!("{} =?= {}", l_index, r_index);
                         if b[l_index] != b[r_index] { return false }
                         
                         b_index += 1;
@@ -140,7 +140,6 @@ impl<'mt_ref, Hash: Eq, const ARITY: usize> PartialEq for MtLvl<'mt_ref, Hash, A
                     let l_index = get_pad_index(l_index, a_len - 1, ARITY);
                     let r_index = get_pad_index(r_index, b_len - 1, ARITY);
                     
-                    // println!("{}({}) =?= {}({})", a_pos_start + i, l_index, b_pos_start + i, r_index);
                     if b[l_index] != b[r_index] { return false }
                 }
             }
@@ -163,7 +162,7 @@ impl LeafId {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MerkleTree<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> {
     tree_lvls: Vec<Vec<Hash>>,
     hasher: Box<Hasher>,
@@ -172,7 +171,7 @@ pub struct MerkleTree<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize
     new_lvl_cap: usize,
     phantom: PhantomData<Hasher>,
 }
-// TODO: merge
+// TODO: get lvl
 // TODO: split (need clone for Hasher & Hash)
 
 impl<Hash: Eq, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {
@@ -245,6 +244,14 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
             phantom: PhantomData,
         }
     }
+    pub fn new_from_leafs<I>(hasher: Hasher, leafs_iter: I) -> Self
+    where I: IntoIterator<Item = Hash>
+    {
+        let mut tree = Self::new_minimal(hasher);
+        let leafs_batch = leafs_iter.into_iter().collect::<Vec<_>>();
+        tree.push_batched(leafs_batch);
+        tree
+    }
 
     /// # panic
     /// * if `self.is_empty()`
@@ -287,6 +294,49 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     }
 }
 impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {
+    fn make_lvl_valid(&mut self, lvl: usize, expected_len: usize) {
+        if self.tree_lvls.len() <= lvl {
+            self.tree_lvls.push(Vec::with_capacity(self.new_lvl_cap.max(expected_len)));
+        }
+    }
+
+    /// # Input
+    /// * `pre_lvl_range`: elemnts of level `lvl - 1` from which hashes calculated
+    /// * `lvl`: for which lvl calculate hashes
+    /// # Return
+    /// * `last_is_even: bool` is last group even
+    fn calc_lvl_hashes(&mut self, pre_lvl_range: Range<usize>, lvl: usize) -> bool {
+        let (from, to) = (pre_lvl_range.start, pre_lvl_range.end);
+        let last_is_even = to % ARITY == 0;
+
+        // in next range all `tree_lvls[lvl - 1]` is valid
+        for elem_index in (from / ARITY)..(to / ARITY) {
+            for win_index in 0..ARITY {
+                self.hasher.hash_arity_one_ref(&self.tree_lvls[lvl - 1][elem_index * ARITY + win_index]);
+            }
+            let new_hash = self.hasher.finish_arity();
+            self.set_or_push(elem_index, lvl, new_hash);
+        }
+
+        if !last_is_even {
+            let new_hash = self.calc_possibly_uneven_group_hash(to - 1, lvl);
+            let elem_index = to / ARITY;
+            self.set_or_push(elem_index, lvl, new_hash);
+        }
+
+        last_is_even
+    }
+
+    /// Calculate hash for group of ARITY elements (that can have less than ARITY child) on level `lvl - 1`.\
+    /// Thah hash used on coresp. elem on level `lvl`.
+    /// 
+    /// ```txt
+    /// level [lvl - 1]: hash(A B C D E) --> result. 
+    /// Where each from {A, B, C, D, E} is group element  
+    /// 
+    /// Result used for level[lvl][index_of_elem_from_group / ARITY].
+    /// ```
+    /// 
     /// # panic
     /// * if `lvl` is `0` 
     fn calc_possibly_uneven_group_hash(&mut self, elem_n_from_group: usize, lvl: usize) -> Hash {
@@ -437,27 +487,8 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
             let lvl_must = length_in_base(self.tree_lvls[0].len() - 1, ARITY) as usize + 1;
 
             while lvl != lvl_must {
-                if self.tree_lvls.len() <= lvl {
-                    let expected_len = (to / ARITY - from / ARITY) + 1;
-                    self.tree_lvls.push(Vec::with_capacity(self.new_lvl_cap.max(expected_len)));
-                }
-
-                let last_is_even = to % ARITY == 0;
-
-                // in next range all `tree_lvls[lvl - 1]` is valid
-                for elem_index in (from / ARITY)..(to / ARITY) {
-                    for win_index in 0..ARITY {
-                        self.hasher.hash_arity_one_ref(&self.tree_lvls[lvl - 1][elem_index * ARITY + win_index]);
-                    }
-                    let new_hash = self.hasher.finish_arity();
-                    self.set_or_push(elem_index, lvl, new_hash);
-                }
-    
-                if !last_is_even {
-                    let new_hash = self.calc_possibly_uneven_group_hash(to - 1, lvl);
-                    let elem_index = to / ARITY;
-                    self.set_or_push(elem_index, lvl, new_hash);
-                }
+                self.make_lvl_valid(lvl, (to / ARITY - from / ARITY) + 1);
+                let last_is_even = self.calc_lvl_hashes(from..to, lvl);
                 
                 lvl += 1;
                 from /= ARITY;
@@ -466,6 +497,71 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
         }
 
         from..to
+    }
+
+    /// It is effective if leaf amount is `pow(ARITY, exp)` & all `MerkleTree`s have the same len.\
+    /// It can be used for parallelism.
+    ///  
+    /// # returns
+    /// * [`None`] if `iter` is empty 
+    /// * [`Some`] of merged tree otherwise 
+    /// # panic
+    /// * if some elements of iterator have non-equal hasher (see [`ArityHasher::is_the_same`]); 
+    pub fn new_merged(iter: impl IntoIterator<Item = Self>) -> Option<Self> {
+        let mut iter = iter.into_iter();
+        let Some(mut tree) = iter.next() else { return None };
+        tree.merge(iter);
+        Some(tree)
+    }
+    
+    /// It is very effective (more effective than `push_batched`) if leaf amount is `pow(ARITY, exp)` 
+    /// & all `MerkleTree`s have the same len.\
+    /// If the order of leafs is not important (you can say the order afterwards) 
+    /// and `MerkleTree`s have different len, then firstly
+    /// place big trees that satisfy the two previous conditions. 
+    /// 
+    /// It can be used for parallelism (accept only trees with some leaf amount, or last trees, if it is time to create tree).
+    /// 
+    /// # returns
+    /// * [`None`] if `iter` is empty 
+    /// * [`Some`] of merged tree otherwise
+    pub fn merge(&mut self, iter: impl IntoIterator<Item = Self>) {
+        for other in iter {
+            if other.leaf_elems() == 0 { continue }
+            let other_height = other.height();
+
+            let mut recalc_index: Option<usize> = None;
+            for (lvl, tree_lvl) in other.tree_lvls.into_iter().enumerate() {
+                self.make_lvl_valid(lvl, tree_lvl.len());
+                
+                if let Some(from_index) = recalc_index {
+                    let pre_lvl_range = from_index..self.tree_lvls[lvl - 1].len();
+                    self.calc_lvl_hashes(pre_lvl_range, lvl);
+                    recalc_index = Some(from_index / ARITY);
+                } else {
+                    let left_len = self.tree_lvls[lvl].len();
+                    self.tree_lvls[lvl].extend(tree_lvl);
+                    if left_len % ARITY != 0 {
+                        recalc_index = Some(left_len);
+                    }
+                }
+            }
+
+            // now calc top if needed
+            let leafs_amount = self.leaf_elems();
+            if leafs_amount == 0 { continue }
+
+            let mut recalc_index = recalc_index.unwrap_or(0);
+            let lvl_must = length_in_base(leafs_amount - 1, ARITY) as usize + 1;
+            for lvl in other_height..lvl_must {
+                let pre_lvl_len = self.tree_lvls[lvl - 1].len();
+                self.make_lvl_valid(lvl,  pre_lvl_len / ARITY);
+                
+                let pre_lvl_range = recalc_index..pre_lvl_len;
+                self.calc_lvl_hashes(pre_lvl_range, lvl);
+                recalc_index = recalc_index / ARITY;
+            }
+        }
     }
 
 }
