@@ -6,7 +6,7 @@ pub mod utility;
 #[cfg(test)]
 mod tests;
 
-pub use merkle_tree::{MerkleTree, MtLvl};
+pub use merkle_tree::{MerkleTree, MtLvl, LeafId, NodeId};
 pub use hasher::{MtHasher, MtArityHasher, MtDataHasher, MtDataHasherStatic};
 
 #[cfg(any(feature = "unsecure", test))]

@@ -196,6 +196,13 @@ impl LeafId {
     }
 }
 
+/// You can get NodeId by [MerkleTree::node_id_by_parent_of_leaf]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct NodeId {
+    pub lvl: usize,
+    pub index: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct MerkleTree<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> {
     tree_lvls: Vec<Vec<Hash>>,
@@ -205,11 +212,10 @@ pub struct MerkleTree<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize
     new_lvl_cap: usize,
     phantom: PhantomData<Hasher>,
 }
+// TODO: recalc node (wo write: &self) -> Hash that should be the same as corresp. Node
+// TODO: swap remove
 // TODO: split (need clone for Hasher & Hash)
-// TODO: ? split storage by max level (& create next tree by getting slice) --> parent structure MerkleTreeLevelSlice;
-//       | & MerkleTree is MerkleTreeLevelSlice(None)
-//       | annoying things here is comment & fns def copy-paste
-//       | but it can be used for very big `MerkleTree`s
+// TODO: diff
 
 impl<Hash: Eq, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {
     /// Test equality of two trees by comparing only equality of height and root.\
@@ -288,6 +294,21 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
         let leafs_batch = leafs_iter.into_iter().collect::<Vec<_>>();
         tree.push_batched(leafs_batch);
         tree
+    }
+    
+    pub fn node_id_by_parent_of_leaf(&self, leaf: LeafId, lvl: usize) -> NodeId {
+        let index = leaf.0 / ARITY.pow(lvl as u32);
+        NodeId {
+            lvl,
+            index
+        }
+    }
+    
+    #[inline(always)]
+    pub fn is_valid_node_id(&self, node_id: NodeId) -> bool {
+        let lvl = node_id.lvl;
+        let index = node_id.index;
+        self.height() < lvl && self.lvl_len(lvl) < index
     }
 
     /// # panic
@@ -611,6 +632,67 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
         }
     }
 
+    /// You can get NodeId by [Self::node_id_by_parent_of_leaf]
+    /// 
+    /// # Panic
+    /// * if `!self.is_valid_node_id`
+    #[inline]
+    pub fn get_node_ref(&self, node_id: NodeId) -> &Hash {
+        &self.tree_lvls[node_id.lvl][node_id.index]
+    }
+}
+impl<Hash: Clone, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {
+    /// You can get NodeId by [Self::node_id_by_parent_of_leaf]
+    /// 
+    /// # Panic
+    /// * if `!self.is_valid_node_id`
+    #[inline]
+    pub fn get_node(&self, node_id: NodeId) -> Hash {
+        self.get_node_ref(node_id).clone()
+    }
+
+    /// Calculate hash of node `node_id` without write it into the node.
+    ///
+    /// You can get NodeId by [Self::node_id_by_parent_of_leaf]
+    /// 
+    /// # Panic
+    /// * if `!self.is_valid_node_id`
+    /// * if `!self.hasher.is_the_same(&hasher)`
+    pub fn recalc_node(&self, node_id: NodeId, hasher: &mut Hasher) -> Hash {
+        if !self.hasher.is_the_same(&hasher) {
+            panic!("hashers is not equal")
+        }
+
+        if node_id.lvl == 0 {
+            return self.tree_lvls[0][node_id.index].clone()
+        }
+
+        let lvl = node_id.lvl - 1;
+
+        let index_start = node_id.index * ARITY;
+        let index_end = (index_start + ARITY).min(self.lvl_len(lvl));
+        let repeat_last = (index_start + ARITY) - index_end;
+        
+        for index in index_start..index_end {
+            hasher.hash_arity_one_ref(&self.tree_lvls[lvl][index]);
+        }
+        for _ in 0..repeat_last {
+            hasher.hash_arity_one_ref(&self.tree_lvls[lvl][index_end - 1]);
+        }
+
+        hasher.finish_arity()
+    }
+}
+impl<Hash: Clone + Eq, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {
+    /// Verify if node `node_id` have correct hash.
+    /// 
+    /// You can get NodeId by [Self::node_id_by_parent_of_leaf]
+    /// 
+    /// # Panic
+    /// * if `!self.is_valid_node_id`
+    pub fn verify_node(&self, node_id: NodeId, hasher: &mut Hasher) -> bool {
+        self.recalc_node(node_id, hasher) == self.tree_lvls[node_id.lvl][node_id.index]
+    }
 }
 impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY>
 {

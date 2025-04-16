@@ -1,6 +1,6 @@
 use std::str::FromStr;
 use rand::{Rng, RngCore};
-use crate::{merkle_tree::{LeafId, MtLvl}, MerkleTree, MtDataHasher, UnsecureHasher};
+use crate::{merkle_tree::{LeafId, MtLvl}, MerkleTree, MtDataHasher, NodeId, UnsecureHasher};
 
 fn unsecure_hash(x: u64) -> u64 {
     let mut hasher = std::hash::DefaultHasher::new();
@@ -47,6 +47,16 @@ fn unsecure_mt_push_test() {
         for data in vec.clone() {
             tree.push_data(data);
         }
+
+        let mut hasher = UnsecureHasher::new();
+        for lvl in 0..tree.height() {
+            let len = tree.get_lvl(lvl).len();
+            for index in 0..len {
+                let node_id = NodeId { lvl, index };
+                let expected = tree.get_node(node_id);
+                assert_eq!(expected, tree.recalc_node(node_id, &mut hasher));
+            }
+        }
         assert_eq!(tree.height(), 3);
     
     
@@ -83,6 +93,16 @@ fn unsecure_mt_push_test() {
         let mut tree = MerkleTree::<u64, UnsecureHasher, 5>::new_minimal(hasher);
         for data in vec.clone() {
             tree.push_data(data);
+        }
+        
+        let mut hasher = UnsecureHasher::new();
+        for lvl in 0..tree.height() {
+            let len = tree.get_lvl(lvl).len();
+            for index in 0..len {
+                let node_id = NodeId { lvl, index };
+                let expected = tree.get_node(node_id);
+                assert_eq!(expected, tree.recalc_node(node_id, &mut hasher));
+            }
         }
     
         let mut awaited = vec![];
