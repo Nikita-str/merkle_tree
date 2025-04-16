@@ -1,4 +1,3 @@
-use std::marker::PhantomData;
 use std::ops::Range;
 use crate::utility::{get_pad_index, length_in_base};
 use crate::MtArityHasher as ArityHasher;
@@ -210,12 +209,11 @@ pub struct MerkleTree<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize
 
     add_lvl_sz: usize,
     new_lvl_cap: usize,
-    phantom: PhantomData<Hasher>,
 }
-// TODO: recalc node (wo write: &self) -> Hash that should be the same as corresp. Node
 // TODO: swap remove
-// TODO: split (need clone for Hasher & Hash)
 // TODO: diff
+// TODO: subtree
+// TODO: extend / continuation to lvl & calc root (of n-th lvl)
 
 impl<Hash: Eq, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {
     /// Test equality of two trees by comparing only equality of height and root.\
@@ -284,7 +282,6 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
             hasher: Box::new(hasher),
             add_lvl_sz: 1,
             new_lvl_cap: 1,
-            phantom: PhantomData,
         }
     }
     pub fn new_from_leafs<I>(hasher: Hasher, leafs_iter: I) -> Self
@@ -692,6 +689,40 @@ impl<Hash: Clone + Eq, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> Mer
     /// * if `!self.is_valid_node_id`
     pub fn verify_node(&self, node_id: NodeId, hasher: &mut Hasher) -> bool {
         self.recalc_node(node_id, hasher) == self.tree_lvls[node_id.lvl][node_id.index]
+    }
+}
+impl<Hash: Clone, Hasher: Clone + ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {
+    /// Last tree can have less height than `lvl`.
+    /// 
+    /// # painc
+    /// * if `lvl >= self.height()`    
+    pub fn split(&self, lvl: usize) -> Vec<Self> {
+        if lvl == 0 && self.is_empty() {
+            return vec![self.clone()]
+        }
+
+        let len = self.lvl_len(lvl);
+        let hasher =self.hasher.as_ref();
+        let mut trees: Vec<Self> = (0..len).into_iter().map(|_|Self::new_minimal(hasher.clone())).collect();
+        trees.iter_mut().for_each(|tree|tree.tree_lvls.clear());
+
+        for cur_lvl in 0..=lvl {
+            let chunk_size = ARITY.pow((lvl - cur_lvl) as u32);
+            for (tree_index, tree_lvl) in self.tree_lvls[cur_lvl].chunks(chunk_size).enumerate() {
+                trees[tree_index].tree_lvls.push(tree_lvl.iter().cloned().collect());
+            }
+        }
+        if let Some(tree) = trees.last_mut() {
+            let height = tree.lvl_must();
+            tree.tree_lvls.truncate(height);
+        }
+        for tree in &mut trees {
+            if tree.tree_lvls.is_empty() {
+                tree.tree_lvls.push(vec![])
+            }
+        }
+
+        trees
     }
 }
 impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY>

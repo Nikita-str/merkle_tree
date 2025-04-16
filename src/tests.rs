@@ -1,6 +1,6 @@
 use std::str::FromStr;
 use rand::{Rng, RngCore};
-use crate::{merkle_tree::{LeafId, MtLvl}, MerkleTree, MtDataHasher, NodeId, UnsecureHasher};
+use crate::{merkle_tree::{LeafId, MtLvl}, utility::length_in_base, MerkleTree, MtDataHasher, NodeId, UnsecureHasher};
 
 fn unsecure_hash(x: u64) -> u64 {
     let mut hasher = std::hash::DefaultHasher::new();
@@ -655,6 +655,24 @@ pub fn merge_test() {
     test_2(a.clone(), b.clone());
     test_2(b, a);
 
+    let a = to_vec_u64("0 1 2 | 3 4 5 | 6 7 8 || 99 ");
+    test_2(a.clone(), a.clone());
+    let a_tree = MerkleTree::<_, _, 3>::new_from_leafs(Hasher::new(), a.clone());
+    let weird_tree = a_tree.split(2).get(1).unwrap().clone();
+    let b = to_vec_u64(" 7 8 || 9 10 11 | 12 13 14 | 15 16 17 ||");
+    let b_tree = MerkleTree::<_, _, 3>::new_from_leafs(Hasher::new(), b.clone());
+    let tree = MerkleTree::new_merged([weird_tree.clone(), b_tree.clone()]).unwrap();
+    let expected = to_vec_u64(" 99 7 8 || 9 10 11 | 12 13 14 | 15 16 17 ||");
+    let expected = MerkleTree::<_, _, 3>::new_from_leafs(Hasher::new(), expected);
+    assert!(tree.eq_full(&expected));
+    let tree = MerkleTree::new_merged([b_tree.clone(), weird_tree.clone()]).unwrap();
+    let expected = to_vec_u64(" 7 8 || 9 10 11 | 12 13 14 | 15 16 17 || 99 ");
+    let expected = MerkleTree::<_, _, 3>::new_from_leafs(Hasher::new(), expected);
+    assert!(tree.eq_full(&expected));
+    let tree = MerkleTree::new_merged([weird_tree.clone(), weird_tree.clone()]).unwrap();
+    let expected = MerkleTree::<_, _, 3>::new_from_leafs(Hasher::new(), [99, 99]);
+    assert!(tree.eq_full(&expected));
+
     let mut vecss = vec![
         vec![(1..=9).collect::<Vec<u64>>(), (10..=19).collect(), (20..=29).collect()],
         vec![(1..=9).collect(), (1 + 10..=27 + 10).collect(), (1 + 100..=27*2 + 100).collect()],
@@ -697,6 +715,63 @@ pub fn merge_test() {
         assert!(expected3.eq_full(&merged3), "{expected3:?}\n=?=\n{merged3:?}\n");
         assert!(expected5.eq_full(&merged5), "{expected5:?}\n=?=\n{merged5:?}\n");
     }
+}
+
+#[test]
+fn split_test() {
+    type Hasher = UnsecureHasher; // AddHasher;
+    let mut rng = rand::rng();
+
+    fn test<const ARITY: usize>(vec: &Vec<u64>) {
+        let x_tree = MerkleTree::<_, _, ARITY>::new_from_leafs(Hasher::new(), vec.clone());
+        let lvls = length_in_base(vec.len() - 1, ARITY) as usize;
+        for lvl in 0..=lvls {
+            let trees = x_tree.clone().split(lvl);
+    
+            let chunk_sz = ARITY.pow(lvl as u32);
+            assert_eq!(trees.len(), vec.chunks(chunk_sz).len());
+            for (index, expected) in vec.chunks(chunk_sz).enumerate() {
+                let expected = expected.iter().cloned();
+                let expected_tree = MerkleTree::<_, _, ARITY>::new_from_leafs(Hasher::new(), expected);
+                assert!(trees[index].eq_full(&expected_tree), "{lvl}:\n{:?}\n=?=\n{:?}", trees[index], expected_tree);
+            }
+        }    
+    }
+
+    let a = to_vec_u64("0 1 2 | 3 4 5 | 6 7 8 || 9 10 11");
+    test::<2>(&a);
+    test::<3>(&a);
+    test::<5>(&a);
+
+    let vecs = vec![
+        (1u64..=9).collect::<Vec<_>>(),
+        (1u64..=24).collect::<Vec<_>>(),
+        (1u64..=39).collect::<Vec<_>>(),
+        (1u64..=25).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+        (1u64..=27).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+    ];
+    for vec in vecs {
+        test::<2>(&vec);
+        test::<3>(&vec);
+        test::<5>(&vec);        
+    }
+    
+    let a = to_vec_u64("0 1");
+    test::<2>(&a);
+    test::<3>(&a);
+    test::<5>(&a);
+    
+    let a = to_vec_u64("0");
+    test::<2>(&a);
+    test::<3>(&a);
+    test::<5>(&a);
+
+    let a = to_vec_u64("");
+    let x_tree = MerkleTree::<_, _, 3>::new_from_leafs(Hasher::new(), a.clone());
+    let mut trees = x_tree.split(0);
+    assert!(trees.len() == 1);
+    let tree = trees.pop().unwrap();
+    assert!(x_tree.eq_full(&tree));
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
