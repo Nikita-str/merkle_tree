@@ -213,7 +213,6 @@ pub struct MerkleTree<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize
     add_lvl_sz: usize,
     new_lvl_cap: usize,
 }
-// TODO: swap remove
 // TODO: diff
 // TODO: subtree
 // TODO: extend / continuation to lvl & calc root (of n-th lvl)
@@ -337,7 +336,7 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
         self.tree_lvls.len()
     }
     #[inline]
-    fn leaf_amount(&self) -> usize {
+    pub fn leaf_count(&self) -> usize {
         // never panic becasue `tree_lvls[0]` always defined
         self.lvl_len(0)
     }
@@ -367,12 +366,16 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     }
 
     pub fn is_valid_leaf_id(&self, id: LeafId) -> bool {
-        id.0 < self.leaf_amount()
+        id.0 < self.leaf_count()
     }
 }
 impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {
     fn lvl_must(&self) -> usize {
-        length_in_base(self.tree_lvls[0].len() - 1, ARITY) as usize + 1
+        if self.is_empty() {
+            0
+        } else {
+            length_in_base(self.tree_lvls[0].len() - 1, ARITY) as usize + 1
+        }
     }
 
     fn make_lvl_valid(&mut self, lvl: usize, expected_len: usize) {
@@ -461,16 +464,16 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     /// [`Self::push_batched`] & [`Self::push_batched_data`] 
     /// they are faster.
     pub fn push(&mut self, hash: Hash) -> LeafId {
-        if self.leaf_amount() == self.add_lvl_sz {
+        if self.leaf_count() == self.add_lvl_sz {
             self.add_lvl_sz *= ARITY;
             self.tree_lvls.push(Vec::with_capacity(self.new_lvl_cap));
         }
 
-        let elem_n = self.leaf_amount();
+        let elem_n = self.leaf_count();
         self.tree_lvls[0].push(hash);
         self.recalc_elem_hashes(elem_n);
 
-        LeafId::new(self.leaf_amount() - 1)
+        LeafId::new(self.leaf_count() - 1)
     }
 
     /// Replace a leaf.
@@ -483,10 +486,14 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     /// 
     /// # panic
     /// * if `self.valid_leaf_id(id)` is false
-    pub fn replace(&mut self, hash: Hash, id: LeafId) {
+    /// 
+    /// # Return
+    /// `Hash` of removed leaf
+    pub fn replace(&mut self, mut hash: Hash, id: LeafId) -> Hash {
         let elem_n = id.0;
-        self.tree_lvls[0][elem_n] = hash;
+        std::mem::swap(&mut hash, &mut self.tree_lvls[0][elem_n]);
         self.recalc_elem_hashes(elem_n);
+        hash
     }
 
     /// Add batch of leafs by hashing data.\
@@ -544,7 +551,7 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
         let mut batch = batch.into_iter();
         
         // replacing hashes from batches while they in valid range  
-        for index in start_id.0..self.leaf_amount() {
+        for index in start_id.0..self.leaf_count() {
             let Some(next_hash) = batch.next() else {
                 ended = true;
                 to = index;
@@ -556,7 +563,7 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
         // if batch not ended during replacing -- add rest hashes to the end of leaf level
         if !ended {
             self.tree_lvls[0].extend(batch);
-            to = self.leaf_amount();
+            to = self.leaf_count();
         }
         let to = LeafId::new(to);
 
@@ -608,7 +615,7 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     /// * [`Some`] of merged tree otherwise
     pub fn merge(&mut self, iter: impl IntoIterator<Item = Self>) {
         for other in iter {
-            if other.leaf_amount() == 0 { continue }
+            if other.leaf_count() == 0 { continue }
             let other_height = other.height();
 
             let mut recalc_index: Option<usize> = None;
@@ -699,7 +706,7 @@ impl<Hash: Clone + Eq, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> Mer
     /// You can get NodeId by [Self::node_id_by_parent_of_leaf]
     /// 
     /// # Panic
-    /// * if `!self.is_valid_node_id`
+    /// * if `!self.is_valid_node_id(node_id)`
     pub fn verify_node(&self, node_id: NodeId, hasher: &mut Hasher) -> bool {
         self.recalc_node(node_id, hasher) == self.tree_lvls[node_id.lvl][node_id.index]
     }
@@ -773,11 +780,74 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     /// If you need replace many elements in a row, better use 
     /// [`Self::replace_batched_data`] 
     /// they are faster.
-    pub fn replace_data<Data>(&mut self, data: Data, id: LeafId)
+    /// 
+    /// # Return
+    /// `Hash` of removed leaf
+    /// 
+    /// # Panic
+    /// * if `!self.is_valid_leaf_id(id)`
+    pub fn replace_data<Data>(&mut self, data: Data, id: LeafId) -> Hash
     where Hasher: DataHasher<Hash, Data>
     {
         let hash = self.hash_data(data);
         self.replace(hash, id)
+    }
+
+    pub fn pop(&mut self) -> Option<Hash> {
+        let Some(removed) = self.tree_lvls[0].pop() else {
+            return None
+        };
+        
+        let height = self.lvl_must();
+        let truncate_to = height.max(1);
+        self.tree_lvls.truncate(truncate_to);
+
+        let mut pre_len = self.leaf_count();
+        let mut pop_stage = true;
+
+        for lvl in 1..height {
+            if pop_stage && pre_len % ARITY == 0 {
+                self.tree_lvls[lvl].pop();
+                pre_len = self.lvl_len(lvl);
+            } else {
+                pop_stage = false;
+                let new_hash = self.calc_possibly_uneven_group_hash(pre_len - 1, lvl);
+                pre_len = self.lvl_len(lvl);
+                self.set_or_push(pre_len - 1, lvl, new_hash);
+            }
+        }
+
+        Some(removed)
+    }
+
+    /// # Return
+    /// `Hash` of removed leaf
+    /// 
+    /// # Panic
+    /// * if `!self.is_valid_leaf_id(id)`
+    pub fn swap_remove(&mut self, id: LeafId) -> Hash {
+        let last_id = self.leaf_count() - 1;
+        let last_hash = self.pop().unwrap();
+
+        // if `id == last_id` => `swap_remove` equal to `pop`:
+        if id.0 == last_id { return last_hash; }
+        
+        self.replace(last_hash, id)
+    }
+    
+    /// # Return
+    /// `Hash` of removed leaf
+    /// 
+    /// # Panic
+    /// * if `!self.is_valid_leaf_id(id_a \ id_b)`
+    pub fn swap(&mut self, id_a: LeafId, id_b: LeafId)
+    where Hash: Clone
+    {
+        if id_a == id_b { return; }
+        
+        let hash_a = self.tree_lvls[0][id_a.0].clone();
+        let hash_b = self.replace(hash_a, id_b);
+        self.replace(hash_b, id_a);
     }
 }
 impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {

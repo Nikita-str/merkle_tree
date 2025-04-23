@@ -1,6 +1,6 @@
 use std::str::FromStr;
 use rand::{Rng, RngCore};
-use crate::{merkle_tree::{LeafId, MerkleTrinaryTree, MtLvl}, utility::length_in_base, MerkleTree, MtDataHasher, NodeId, UnsecureHasher};
+use crate::{merkle_tree::{LeafId, MerkleTrinaryTree, MtLvl}, utility::length_in_base, MerkleTree, MtDataHasher, MtDataHasherStatic, NodeId, UnsecureHasher};
 
 fn unsecure_hash(x: u64) -> u64 {
     let mut hasher = std::hash::DefaultHasher::new();
@@ -516,11 +516,12 @@ pub fn replace_test() {
             tree5.push_batched(vec.clone());
             
             let index = rng.random_range(0..vec.len());
-            let new_hash = rng.next_u64(); 
+            let new_hash = rng.next_u64();
+            let expect = vec[index];
             vec[index] = new_hash;
-            tree2.replace(new_hash, LeafId::new(index));
-            tree3.replace(new_hash, LeafId::new(index));
-            tree5.replace(new_hash, LeafId::new(index));
+            assert_eq!(expect, tree2.replace(new_hash, LeafId::new(index)));
+            assert_eq!(expect, tree3.replace(new_hash, LeafId::new(index)));
+            assert_eq!(expect, tree5.replace(new_hash, LeafId::new(index)));
             
             let mut tree2x = MerkleTree::<u64, Hasher, 2>::new_minimal(Hasher::new());
             let mut tree3x = MerkleTree::<u64, Hasher, 3>::new_minimal(Hasher::new());
@@ -901,6 +902,107 @@ fn serde_test() {
         test::<2>(vec);
         test::<3>(vec);
         test::<5>(vec);
+    }
+}
+
+#[test]
+fn pop_test() {
+    type Hasher = UnsecureHasher; // AddHasher;
+    type Tree<const ARITY: usize> = MerkleTree<u64, Hasher, ARITY>;
+    let mut rng = rand::rng();
+    
+    fn test<const N: usize>(vec: &Vec<u64>) {
+        let mut tree = Tree::<N>::new_from_data(Hasher::new(), vec.clone());
+        while let Some(removed_hash) = tree.pop() {
+            let to = tree.leaf_count();
+            let iter = vec[0..to].iter().cloned();
+            let tree_must = Tree::<N>::new_from_data(Hasher::new(), iter);
+            assert!(tree.eq_full(&tree_must), "{tree:?}\n=?=\n{tree_must:?}");
+            assert_eq!(removed_hash, Hasher::hash_data_static(vec[to]));
+        }
+        assert!(tree.is_empty());
+    }
+    
+    let vecs = vec![
+        (1u64..=4).collect::<Vec<_>>(),
+        vec![],
+        vec![1],
+        vec![1, 2],
+        (1u64..=9).collect::<Vec<_>>(),
+        (1u64..=12).collect::<Vec<_>>(),
+        (1u64..=24).collect::<Vec<_>>(),
+        (1u64..=39).collect::<Vec<_>>(),
+        (1u64..=25).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+        (1u64..=27).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+        (1u64..=58).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+    ];
+    for vec in &vecs {
+        test::<2>(vec);
+        test::<3>(vec);
+        test::<5>(vec);
+    }
+}
+
+#[test]
+fn swap_remove_test() {
+    type Hasher = UnsecureHasher; // AddHasher;
+    type Tree<const ARITY: usize> = MerkleTree<u64, Hasher, ARITY>;
+    let mut rng = rand::rng();
+    
+    fn test<const N: usize>(vec: &Vec<u64>) {
+        let mut rng = rand::rng();
+        let mut tree = Tree::<N>::new_from_data(Hasher::new(), vec.clone());
+        let mut vec = vec.clone();
+        while !tree.is_empty() {
+            let leaf_id = LeafId::new(rng.random_range(0..tree.leaf_count()));
+            let hash = tree.swap_remove(leaf_id);
+            let exp_hash = Hasher::hash_data_static(vec.swap_remove(leaf_id.index()));
+            assert_eq!(hash, exp_hash);
+            let tree_must = Tree::<N>::new_from_data(Hasher::new(), vec.clone());
+            assert!(tree.eq_full(&tree_must));
+        }
+        assert!(tree.is_empty());
+    }
+        
+    fn test_swap<const N: usize>(vec: &Vec<u64>) {
+        if vec.is_empty() { return }
+        let mut rng = rand::rng();
+        let mut tree = Tree::<N>::new_from_data(Hasher::new(), vec.clone());
+        let mut vec = vec.clone();
+        for _ in 0..11 {
+            let id_a = LeafId::new(rng.random_range(0..tree.leaf_count()));
+            let id_b = LeafId::new(rng.random_range(0..tree.leaf_count()));
+            tree.swap(id_a, id_b);
+            vec.swap(id_a.index(), id_b.index());
+            let tree_must = Tree::<N>::new_from_data(Hasher::new(), vec.clone());
+            assert!(tree.eq_full(&tree_must));
+        }
+    }
+
+    let vecs = vec![
+        (1u64..=4).collect::<Vec<_>>(),
+        vec![],
+        vec![1],
+        vec![1, 2],
+        (1u64..=9).collect::<Vec<_>>(),
+        (1u64..=12).collect::<Vec<_>>(),
+        (1u64..=24).collect::<Vec<_>>(),
+        (1u64..=39).collect::<Vec<_>>(),
+        (1u64..=25).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+        (1u64..=27).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+        (1u64..=58).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+    ];
+    // test swap_remove:
+    for vec in &vecs {
+        test::<2>(vec);
+        test::<3>(vec);
+        test::<5>(vec);
+    }
+    // test swap:
+    for vec in &vecs {
+        test_swap::<2>(vec);
+        test_swap::<3>(vec);
+        test_swap::<5>(vec);
     }
 }
 
