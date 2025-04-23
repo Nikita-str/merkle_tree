@@ -22,5 +22,6 @@ default = ["unsecure", "bitcoin"]
 bitcoin = ["sha2", "bitcoin_test"]
 bitcoin_test = ["reqwest", "tokio", "serde", "serde_json"]
 serde = ["dep:serde"]
+serde_test = ["serde", "serde_json"]
 
 unsecure = []

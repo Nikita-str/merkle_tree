@@ -81,7 +81,6 @@ pub enum ParseBitcoinHashError {
     InvalidLength(usize),
     #[error("Unexpected hash character({0}). Allows only: '0'..='9'; 'a'..='f'")] // ? 'A'..='F'
     UnexpectedChar(char),
-    
 }
 impl FromStr for Hash {
     type Err = ParseBitcoinHashError;

@@ -189,6 +189,10 @@ impl LeafId {
     pub fn new(id: usize) -> Self {
         Self(id)
     }
+    #[inline(always)]
+    pub fn index(self) -> usize {
+        self.0
+    }
 }
 
 /// You can get NodeId by [MerkleTree::node_id_by_parent_of_leaf]
@@ -213,9 +217,10 @@ pub struct MerkleTree<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize
 // TODO: diff
 // TODO: subtree
 // TODO: extend / continuation to lvl & calc root (of n-th lvl)
-// TODO: serde wo hasher
 
 impl<Hash: Eq, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {
+    pub const ARITY: usize = ARITY;
+
     /// Test equality of two trees by comparing only equality of height and root.\
     /// In most case it is enough.
     /// 
@@ -816,11 +821,146 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     {
         self.proof_ref(id).to_owned()
     }
+
+    #[cfg(feature = "serde")]
+    pub fn serializable(&self) -> MtSerde<Hash, ARITY>
+    where Hash: Clone
+    {
+        MtSerde::from_merkle_tree(&self)
+    }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// [+] MerkleTree Serde
+
+#[cfg(feature = "serde")]
+impl<
+    Hash: serde::Serialize, 
+    Hasher: ArityHasher<Hash, ARITY>, 
+    const ARITY: usize
+> serde::Serialize for MerkleTree<Hash, Hasher, ARITY> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where S: serde::Serializer
+    {
+        MtSerdeRef::from_merkle_tree(self).serialize(serializer)
+    }
+}
+#[cfg(feature = "serde")]
+impl<'de, 
+    Hash: serde::Deserialize<'de> + Eq + Clone + std::fmt::Debug, 
+    Hasher: ArityHasher<Hash, ARITY> + Default, 
+    const ARITY: usize
+> serde::Deserialize<'de> for MerkleTree<Hash, Hasher, ARITY> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where D: serde::Deserializer<'de>
+    {
+        let mt_serde = MtSerde::deserialize(deserializer)?;
+        mt_serde.to_merkle_tree(Hasher::default()).map_err(serde::de::Error::custom)
+    }
+}
+
+#[cfg(feature = "serde")]
+#[derive(thiserror::Error, Debug)]
+pub enum MerkleTreeSerdeError<Hash> {
+    #[error("Invalid arity. Expected arity {0}, but it was {1}. Just use correct arity for the tree.")]
+    InvalidArity(usize, usize),
+    #[error("Wrong root(expected: {0:?}; was: {1:?}). There is potentially an error in the algorithm. Please report this.")]
+    WrongRoot(Hash, Hash),
+    #[error("Tree must be empty, but it's not?!")]
+    ExpectedEmptyTree,
+}
+#[cfg(feature = "serde")]
+#[derive(serde::Serialize, serde::Deserialize)]
+/// `Mt` stands for `MerkleTree`
+pub struct MtSerde<Hash, const ARITY: usize> {
+    leafs: Vec<Hash>,
+    root: Option<Hash>,
+    arity: usize,
+}
+#[cfg(feature = "serde")]
+impl<Hash, const ARITY: usize> MtSerde<Hash, ARITY> {
+    pub fn to_merkle_tree<Hasher>(self, hasher: Hasher) -> Result<MerkleTree<Hash, Hasher, ARITY>, MerkleTreeSerdeError<Hash>>
+    where
+        Hash: Eq + Clone,
+        Hasher: ArityHasher<Hash, ARITY>
+    {
+        if self.arity != ARITY {
+            return Err(MerkleTreeSerdeError::InvalidArity(ARITY, self.arity));
+        }
+
+        let tree = MerkleTree::new_from_leafs(hasher, self.leafs);
+        if let Some(root) = self.root {
+            if tree.root_ref() != &root {
+                return Err(MerkleTreeSerdeError::WrongRoot(root, tree.root()));
+            }
+        } else {
+            if !tree.is_empty() {
+                return Err(MerkleTreeSerdeError::ExpectedEmptyTree);
+            }
+        }
+
+        Ok(tree)
+    }
+    pub fn from_merkle_tree<Hasher>(mt: &MerkleTree<Hash, Hasher, ARITY>) -> Self
+    where
+        Hash: Clone,
+        Hasher: ArityHasher<Hash, ARITY>
+    {
+        let leafs = mt.tree_lvls[0].clone();
+        if mt.is_empty() {
+            Self {
+                leafs,
+                root: None,
+                arity: ARITY,
+            }
+        } else {
+            Self {
+                leafs,
+                root: Some(mt.root()),
+                arity: ARITY,
+            }
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+#[derive(serde::Serialize)]
+/// `Mt` stands for `MerkleTree`
+pub struct MtSerdeRef<'tree, Hash, const ARITY: usize> {
+    leafs: &'tree Vec<Hash>,
+    root: Option<&'tree Hash>,
+    arity: usize,
+}
+#[cfg(feature = "serde")]
+impl<'tree, Hash, const ARITY: usize> MtSerdeRef<'tree, Hash, ARITY> {
+    pub fn from_merkle_tree<Hasher>(mt: &'tree MerkleTree<Hash, Hasher, ARITY>) -> Self
+    where Hasher: ArityHasher<Hash, ARITY>
+    {
+        let leafs = &mt.tree_lvls[0];
+        if mt.is_empty() {
+            Self {
+                leafs,
+                root: None,
+                arity: ARITY,
+            }
+        } else {
+            Self {
+                leafs,
+                root: Some(mt.root_ref()),
+                arity: ARITY,
+            }
+        }
+    }
+}
+
+// [-] MerkleTree Serde
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// [+] MerkleTree Proof
 
 /// `Mt` stands for `MerkleTree`
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MtProof<Hash, const ARITY: usize> {
     /// SHOULD have len: `ARITY * LVLs` 
     tree_lvl_nodes: Vec<Hash>,
@@ -920,3 +1060,6 @@ impl<'tree, Hash: Clone, const ARITY: usize> MtProofRef<'tree, Hash, ARITY> {
         }
     }
 }
+
+// [-] MerkleTree Proof
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

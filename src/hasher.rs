@@ -109,6 +109,12 @@ pub struct UnsecureHasher {
     inner: StdHasher,
 }
 
+impl Default for UnsecureHasher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(any(feature = "unsecure", test))]
 impl UnsecureHasher {
     pub fn new() -> Self {

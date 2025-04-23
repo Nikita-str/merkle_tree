@@ -12,6 +12,8 @@ pub mod bitcoin;
 pub use merkle_tree::{MtLvl, LeafId, NodeId};
 pub use merkle_tree::{MtProofRef, MtProof};
 pub use merkle_tree::{MerkleTree, MerkleBinTree, MerkleTrinaryTree};
+#[cfg(feature = "serde")]
+pub use merkle_tree::{MtSerde, MerkleTreeSerdeError};
 
 pub use hasher::{MtHasher, MtArityHasher, MtDataHasher, MtDataHasherStatic};
 
@@ -23,4 +25,7 @@ pub mod prelude {
     pub use crate::MtProofRef;
     pub use crate::{LeafId, NodeId};
     pub use crate::{MtArityHasher, MtDataHasher};
+
+    #[cfg(feature = "serde")]
+    pub use crate::MtSerde;
 }

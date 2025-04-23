@@ -1,5 +1,5 @@
 use std::str::FromStr;
-use crate::bitcoin::{Hash, MerkleTreeBitcoin, SingleBlock};
+use crate::{bitcoin::{Hash, MerkleTreeBitcoin, SingleBlock}, MtProof};
 
 async fn ser_block_into_file(block: &str) -> Result<(), Box<dyn std::error::Error>> {
     let url = format!("https://blockchain.info/rawblock/{block}");
@@ -46,10 +46,31 @@ async fn big_bitcoin_block_test() -> Result<(), Box<dyn std::error::Error>> {
         let file = std::fs::read(json_file)?;
         let single_block: SingleBlock = serde_json::from_slice(&file)?;
         
+        let index_proof = 173;
+        let hash_valid_proof = single_block.txs[index_proof].hash.clone();
+        let hash_invalid_proof = single_block.txs[index_proof + 3].hash.clone();
+        
         let iter = single_block.txs.into_iter().map(|tx|tx.hash);
         let tree = MerkleTreeBitcoin::new_by_leafs(iter);
-        
+
+        // test validness of merkle tree root
         assert_eq!(single_block.mrkl_root, tree.root());
+
+        // test proof validity
+        let proof = tree.proof_owned(crate::LeafId::new(index_proof));
+        assert!(proof.verify(hash_valid_proof.clone(), &mut super::BitcoinHasher::new()));
+        assert!(!proof.verify(hash_invalid_proof.clone(), &mut super::BitcoinHasher::new()));
+        
+        // test proof serde
+        let proof = serde_json::to_string_pretty(&proof)?;
+        let proof: MtProof<Hash, { MerkleTreeBitcoin::ARITY }> = serde_json::from_str(&proof)?;
+        assert!(proof.verify(hash_valid_proof, &mut super::BitcoinHasher::new()));
+        assert!(!proof.verify(hash_invalid_proof, &mut super::BitcoinHasher::new()));
+        
+        // test tree serialize / deserialize
+        let tree_serde = serde_json::to_string(&tree)?;
+        let tree_unser: MerkleTreeBitcoin = serde_json::from_str(&tree_serde)?;
+        assert!(tree.eq_full(&tree_unser));
     }
     Ok(())
 }

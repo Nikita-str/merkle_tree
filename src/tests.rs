@@ -851,6 +851,59 @@ fn proof_test() {
     }
 }
 
+#[cfg(feature = "serde_json")]
+#[test]
+fn serde_test() {
+    type Hasher = UnsecureHasher; // AddHasher;
+    let mut rng = rand::rng();
+    
+    fn test<const ARITY: usize>(vec: &Vec<u64>) {
+        let x_tree = MerkleTree::<_, _, ARITY>::new_from_data(Hasher::new(), vec.clone());
+        let tree_s = serde_json::to_string(&x_tree).unwrap();
+        let tree_deser = serde_json::from_str(&tree_s).unwrap();
+        assert!(x_tree.eq_full(&tree_deser));
+
+        // for cases when we there no Default impl for Hasher
+        let tree_deser: crate::MtSerde<_, ARITY> = serde_json::from_str(&tree_s).unwrap();
+        let tree_deser = tree_deser.to_merkle_tree(Hasher::new()).unwrap();
+        assert!(x_tree.eq_full(&tree_deser));
+
+        if vec.len() > 8 {
+            let proof = x_tree.proof_owned(LeafId::new(7));
+            let proof_ser = serde_json::to_string(&proof).unwrap();
+            let proof_deser: crate::MtProof<u64, ARITY> = serde_json::from_str(&proof_ser).unwrap();
+            
+            let mut hasher = Hasher::new();
+            assert!(proof.verify_data(vec[7], &mut hasher));
+            assert!(!proof.verify_data(vec[8], &mut hasher));
+            assert!(!proof.verify_data(vec[5], &mut hasher));
+            
+            assert!(proof_deser.verify_data(vec[7], &mut hasher));
+            assert!(!proof_deser.verify_data(vec[8], &mut hasher));
+            assert!(!proof_deser.verify_data(vec[5], &mut hasher));
+        }
+    }
+
+    let vecs = vec![
+        (1u64..=4).collect::<Vec<_>>(),
+        vec![],
+        vec![1],
+        vec![1, 2],
+        (1u64..=9).collect::<Vec<_>>(),
+        (1u64..=12).collect::<Vec<_>>(),
+        (1u64..=24).collect::<Vec<_>>(),
+        (1u64..=39).collect::<Vec<_>>(),
+        (1u64..=25).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+        (1u64..=27).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+        (1u64..=58).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+    ];
+    for vec in &vecs {
+        test::<2>(vec);
+        test::<3>(vec);
+        test::<5>(vec);
+    }
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // [+] AddHasher
 
