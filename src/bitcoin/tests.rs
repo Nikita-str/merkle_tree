@@ -1,5 +1,4 @@
 use std::str::FromStr;
-
 use crate::bitcoin::{Hash, MerkleTreeBitcoin, SingleBlock};
 
 async fn ser_block_into_file(block: &str) -> Result<(), Box<dyn std::error::Error>> {

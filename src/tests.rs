@@ -1,6 +1,6 @@
 use std::str::FromStr;
 use rand::{Rng, RngCore};
-use crate::{merkle_tree::{LeafId, MtLvl}, utility::length_in_base, MerkleTree, MtDataHasher, NodeId, UnsecureHasher};
+use crate::{merkle_tree::{LeafId, MerkleTrinaryTree, MtLvl}, utility::length_in_base, MerkleTree, MtDataHasher, NodeId, UnsecureHasher};
 
 fn unsecure_hash(x: u64) -> u64 {
     let mut hasher = std::hash::DefaultHasher::new();
@@ -26,6 +26,23 @@ fn unsecure_next_lvl_hash(prev_lvl: &[u64], arity: usize) -> Vec<u64> {
         unsecure_hash_v(&x)
     }).collect()
 } 
+
+#[test]
+fn tree_height_test() {
+    let hasher = UnsecureHasher::new(); 
+    let tree = MerkleTrinaryTree::new_from_leafs(hasher.clone(), []); 
+    assert_eq!(tree.height(), 0);
+    let tree = MerkleTrinaryTree::new_from_leafs(hasher.clone(), [9]); 
+    assert_eq!(tree.height(), 1);
+    let tree = MerkleTrinaryTree::new_from_leafs(hasher.clone(), [9, 10]);
+    assert_eq!(tree.height(), 2);
+    let tree = MerkleTrinaryTree::new_from_leafs(hasher.clone(), [9, 10, 11]);
+    assert_eq!(tree.height(), 2);
+    let tree = MerkleTrinaryTree::new_from_leafs(hasher.clone(), [9, 10, 11, 12]);
+    assert_eq!(tree.height(), 3);
+    let tree = MerkleTrinaryTree::new_from_leafs(hasher.clone(), [1, 2, 3, 4, 5, 6, 7]);
+    assert_eq!(tree.height(), 3);
+}
 
 #[test]
 fn unsecure_mt_push_test() {
@@ -772,6 +789,66 @@ fn split_test() {
     assert!(trees.len() == 1);
     let tree = trees.pop().unwrap();
     assert!(x_tree.eq_full(&tree));
+}
+
+#[test]
+fn proof_test() {
+    type Hasher = UnsecureHasher; // AddHasher;
+    let mut rng = rand::rng();
+
+    fn test<const ARITY: usize>(vec: &Vec<u64>) {
+        let x_tree = MerkleTree::<_, _, ARITY>::new_from_data(Hasher::new(), vec.clone());
+        let mut hasher = Hasher::new();
+        let hasher = &mut hasher;
+
+        for (id, data) in vec.iter().copied().enumerate() {
+            let proof = x_tree.proof_ref(LeafId::new(id));
+            let proof_owned = x_tree.proof_owned(LeafId::new(id));
+            let hash = hasher.hash_data(data);
+
+            assert!(!proof.verify_data(data + 3, hasher));
+            assert!(proof.verify(hash, hasher));
+            assert!(proof.verify_data(data, hasher));
+            assert!(proof_owned.verify(hash, hasher));
+            assert!(proof_owned.verify_data(data, hasher));
+
+            for (_, data2) in vec.iter().copied().enumerate() {
+                if data == data2 { continue; }
+
+                let hash2 = hasher.hash_data(data2);
+                assert!(!proof.verify(hash2, hasher));
+                assert!(!proof.verify_data(data2, hasher));
+                assert!(!proof_owned.verify(hash2, hasher));
+                assert!(!proof_owned.verify_data(data2, hasher));
+             }
+        }
+    }
+    
+    let a = to_vec_u64("0 1");
+    test::<2>(&a);
+    test::<3>(&a);
+    test::<5>(&a);
+    
+    let a = to_vec_u64("0");
+    test::<2>(&a);
+    test::<3>(&a);
+    test::<5>(&a);
+
+    let vecs = vec![
+        (1u64..=4).collect::<Vec<_>>(),
+        (1u64..=9).collect::<Vec<_>>(),
+        (1u64..=12).collect::<Vec<_>>(),
+        (1u64..=24).collect::<Vec<_>>(),
+        (1u64..=39).collect::<Vec<_>>(),
+        (1u64..=25).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+        (1u64..=27).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+        (1u64..=58).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+    ];
+    for vec in vecs {
+        test::<2>(&vec);
+        test::<3>(&vec);
+        test::<5>(&vec);        
+    }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

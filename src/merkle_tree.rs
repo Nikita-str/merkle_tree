@@ -4,10 +4,6 @@ use crate::MtArityHasher as ArityHasher;
 use crate::MtDataHasher as DataHasher;
 use crate::MtDataHasherStatic as StaticDataHasher;
 
-struct MerkleTreePath {
-    bin_path: Vec<u8>, // TODO: SmallVec
-}
-
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // [+] Merkle Tree Level
 
@@ -21,10 +17,10 @@ struct MerkleTreePath {
 /// 1B. || 9 8 7 | 7 8 9 | 9 1 9 || 0 1 2 | 3 4 4 | 3 4 4 ||
 /// 1C. || 9 8 7 | 7 8 9 | 9 1 9 || 0 1 2 | 3 4 4 | 3 4 4 || 0 1 2 | 3 4 4 | 3 4 4 ||
 /// 
-/// 2A. || 1 2 3 | 4 5 6 | 0 0 5 || 7 7 7 | 7 7 7| 7 7 7 ||  
-/// 2B. || 1 2 3 | 4 5 6 | 0 0 5 || 7 7 7 | 7 7 7| 7 7 7 || 7 
+/// 2A. || 1 2 3 | 4 5 6 | 0 0 5 || 7 7 7 | 7 7 7 | 7 7 7 ||  
+/// 2B. || 1 2 3 | 4 5 6 | 0 0 5 || 7 7 7 | 7 7 7 | 7 7 7 || 7 
 /// because they both will be equal to: 
-/// 2(equal). || 1 2 3 | 4 5 6 | 0 0 5 || 7 7 7 | 7 7 7| 7 7 7 || 7 7 7 | 7 7 7| 7 7 7 ||
+/// 2(equal). || 1 2 3 | 4 5 6 | 0 0 5 || 7 7 7 | 7 7 7 | 7 7 7 || 7 7 7 | 7 7 7 | 7 7 7 ||
 /// ```
 /// And next are **not** equal:
 /// ```txt
@@ -34,11 +30,11 @@ struct MerkleTreePath {
 /// 1A(equal). || 9 8 7 | 7 8 9 | 9 1 9 || 0 1 2 | 3 4 4 | 3 3 4 ||
 /// 1B(equal). || 9 8 7 | 7 8 9 | 9 1 9 || 0 1 2 | 3 4 4 | 3 3 4 ||
 /// 
-/// 2A. || 1 2 3 | 4 5 6 | 0 0 5 || 7 7 7 | 7 7 7| 7 8 7 ||  
-/// 2B. || 1 2 3 | 4 5 6 | 0 0 5 || 7 7 7 | 7 7 7| 7 8 7 || 7 
+/// 2A. || 1 2 3 | 4 5 6 | 0 0 5 || 7 7 7 | 7 7 7 | 7 8 7 ||  
+/// 2B. || 1 2 3 | 4 5 6 | 0 0 5 || 7 7 7 | 7 7 7 | 7 8 7 || 7 
 /// because they will be equal to: 
-/// 2A(equal). || 1 2 3 | 4 5 6 | 0 0 5 || 7 7 7 | 7 7 7| 7 8 7 || 7 7 7 | 7 7 7| 7 8 7 ||
-/// 2B(equal). || 1 2 3 | 4 5 6 | 0 0 5 || 7 7 7 | 7 7 7| 7 8 7 || 7 7 7 | 7 7 7| 7 7 7 ||
+/// 2A(equal). || 1 2 3 | 4 5 6 | 0 0 5 || 7 7 7 | 7 7 7 | 7 8 7 || 7 7 7 | 7 7 7 | 7 8 7 ||
+/// 2B(equal). || 1 2 3 | 4 5 6 | 0 0 5 || 7 7 7 | 7 7 7 | 7 8 7 || 7 7 7 | 7 7 7 | 7 7 7 ||
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct MtLvl<'mt_ref, Hash, const ARITY: usize> {
@@ -202,6 +198,9 @@ pub struct NodeId {
     pub index: usize,
 }
 
+pub type MerkleBinTree<Hash, Hasher> = MerkleTree<Hash, Hasher, 2>; 
+pub type MerkleTrinaryTree<Hash, Hasher> = MerkleTree<Hash, Hasher, 3>; 
+
 #[derive(Debug, Clone)]
 pub struct MerkleTree<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> {
     tree_lvls: Vec<Vec<Hash>>,
@@ -214,6 +213,7 @@ pub struct MerkleTree<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize
 // TODO: diff
 // TODO: subtree
 // TODO: extend / continuation to lvl & calc root (of n-th lvl)
+// TODO: serde wo hasher
 
 impl<Hash: Eq, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {
     /// Test equality of two trees by comparing only equality of height and root.\
@@ -288,8 +288,16 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     where I: IntoIterator<Item = Hash>
     {
         let mut tree = Self::new_minimal(hasher);
-        let leafs_batch = leafs_iter.into_iter().collect::<Vec<_>>();
-        tree.push_batched(leafs_batch);
+        tree.push_batched(leafs_iter);
+        tree
+    }
+    pub fn new_from_data<I, Data>(hasher: Hasher, leafs_iter: I) -> Self
+    where
+        I: IntoIterator<Item = Data>,
+        Hasher: StaticDataHasher<Hash, Data>,
+    {
+        let mut tree = Self::new_minimal(hasher);
+        tree.push_batched_data(leafs_iter);
         tree
     }
     
@@ -353,7 +361,7 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
         }
     }
 
-    pub fn valid_leaf_id(&self, id: LeafId) -> bool {
+    pub fn is_valid_leaf_id(&self, id: LeafId) -> bool {
         id.0 < self.leaf_amount()
     }
 }
@@ -765,5 +773,150 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     {
         let hash = self.hash_data(data);
         self.replace(hash, id)
+    }
+}
+impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {
+    /// # panic 
+    /// * if `!self.is_valid_leaf_id(id)`
+    pub fn proof_ref(&self, id: LeafId) -> MtProofRef<'_, Hash, ARITY> {
+        assert!(self.height() != 0);
+
+        let mut index = id.0;
+        let mut lvl = 0;
+        let mut tree_lvl_nodes = vec![];
+        let mut tree_lvl_path = vec![];
+
+        while lvl + 1 < self.height() {
+            let tree_lvl = &self.tree_lvls[lvl];
+
+            let next_index = index / ARITY;
+            let index_start = next_index * ARITY;
+            let index_end = (index_start + ARITY).min(tree_lvl.len());
+            tree_lvl_nodes.push(&tree_lvl[index_start..index_end]);
+            tree_lvl_path.push(index % ARITY);
+            index = next_index;
+            lvl += 1;
+        }
+
+        return MtProofRef {
+            tree_lvl_nodes,
+            tree_lvl_path,
+            root: self.root_ref(),
+        }
+    }
+
+    /// Locally better use [`Self::proof_ref`].
+    /// 
+    /// It needs in cases when you need to send Proof somewhere.
+    /// 
+    /// # panic
+    /// * if `!self.is_valid_leaf_id(id)`
+    pub fn proof_owned(&self, id: LeafId) -> MtProof<Hash, ARITY>
+    where Hash: Clone
+    {
+        self.proof_ref(id).to_owned()
+    }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// `Mt` stands for `MerkleTree`
+pub struct MtProof<Hash, const ARITY: usize> {
+    /// SHOULD have len: `ARITY * LVLs` 
+    tree_lvl_nodes: Vec<Hash>,
+    tree_lvl_path: Vec<usize>,
+    root: Hash,
+}
+impl<Hash: Eq, const ARITY: usize> MtProof<Hash, ARITY> {
+    pub fn verify<Hasher>(&self, mut hash: Hash, hasher: &mut Hasher) -> bool
+    where Hasher: ArityHasher<Hash, ARITY>
+    {
+        for (cur_lvl, path_index) in self.tree_lvl_path.iter().copied().enumerate() {
+            let is_valid = self.tree_lvl_nodes[cur_lvl * ARITY + path_index] == hash;
+            if !is_valid { return false }
+
+            for index in 0..ARITY {
+                hasher.hash_arity_one_ref(&self.tree_lvl_nodes[cur_lvl * ARITY + index]);
+            }
+            hash = hasher.finish_arity();
+        }
+        hash == self.root
+    }
+
+    pub fn verify_data<Data, Hasher>(&self, data: Data, hasher: &mut Hasher) -> bool
+    where Hasher: ArityHasher<Hash, ARITY> + DataHasher<Hash, Data>
+    {
+        let hash = hasher.hash_data(data);
+        self.verify(hash, hasher)
+    }
+}
+
+/// `Mt` stands for `MerkleTree`
+pub struct MtProofRef<'tree, Hash, const ARITY: usize> {
+    tree_lvl_nodes: Vec<&'tree [Hash]>,
+    tree_lvl_path: Vec<usize>,
+    root: &'tree Hash,
+}
+impl<'tree, Hash, const ARITY: usize> Clone for MtProofRef<'tree, Hash, ARITY> {
+    fn clone(&self) -> Self {
+        Self { 
+            tree_lvl_nodes: self.tree_lvl_nodes.clone(), 
+            tree_lvl_path: self.tree_lvl_path.clone(), 
+            root: self.root,
+        }
+    }
+}
+impl<'tree, Hash: Eq, const ARITY: usize> MtProofRef<'tree, Hash, ARITY> {
+    pub fn verify<Hasher>(&self, mut hash: Hash, hasher: &mut Hasher) -> bool
+    where Hasher: ArityHasher<Hash, ARITY>
+    {
+        for (cur_lvl, path_index) in self.tree_lvl_path.iter().copied().enumerate() {
+            let is_valid = self.tree_lvl_nodes[cur_lvl][path_index] == hash;
+            if !is_valid { return false }
+
+            let nodes_amount = self.tree_lvl_nodes[cur_lvl].len();
+            for hash in self.tree_lvl_nodes[cur_lvl] {
+                hasher.hash_arity_one_ref(hash);
+            }
+
+            // if we have unaligned amount of nodes on current lvl 
+            // => we need to hash last node few times more 
+            for _ in 0..(ARITY - nodes_amount) {
+                hasher.hash_arity_one_ref(&self.tree_lvl_nodes[cur_lvl][nodes_amount - 1]);
+            }
+
+            hash = hasher.finish_arity();
+        }
+        &hash == self.root
+    }
+
+    pub fn verify_data<Data, Hasher>(&self, data: Data, hasher: &mut Hasher) -> bool
+    where Hasher: ArityHasher<Hash, ARITY> + DataHasher<Hash, Data>
+    {
+        let hash = hasher.hash_data(data);
+        self.verify(hash, hasher)
+    }
+}
+impl<'tree, Hash: Clone, const ARITY: usize> MtProofRef<'tree, Hash, ARITY> {
+    pub fn to_owned(self) -> MtProof<Hash, ARITY> {
+        let mut tree_lvl_nodes = Vec::with_capacity(self.tree_lvl_nodes.len() * ARITY);
+        for lvl_nodes in self.tree_lvl_nodes {
+            let len = lvl_nodes.len();
+
+            for index in 0..len {
+                tree_lvl_nodes.push(lvl_nodes[index].clone());
+            }
+
+            // align it if unaligned:
+            for _ in len..ARITY {
+                tree_lvl_nodes.push(lvl_nodes[len - 1].clone());
+            }
+        }
+
+        MtProof {
+            tree_lvl_nodes,
+            tree_lvl_path: self.tree_lvl_path,
+            root: self.root.clone(),
+        }
     }
 }

@@ -1,6 +1,6 @@
 use std::str::FromStr;
 use sha2::{Sha256, Digest};
-use crate::{MtDataHasher, MtHasher};
+use crate::MtHasher;
 
 const HASH_CHAR_LEN: usize = 64;
 
@@ -161,15 +161,10 @@ impl MtHasher<Hash> for BitcoinHasher {
     }
 }
 
-impl<Data: AsRef<[u8]>> MtDataHasher<Hash, Data> for BitcoinHasher {
-    fn hash_data(&mut self, data: Data) -> Hash {
-        self.inner.update(data);
-        self.finish()
-    }
-}
-
 impl<Data: AsRef<[u8]>> crate::MtDataHasherStatic<Hash, Data> for BitcoinHasher {
     fn hash_data_static(data: Data) -> Hash {
-        Self::new().hash_data(data)
+        let mut hasher = Self::new();
+        hasher.inner.update(data);
+        hasher.finish()
     }
 }
