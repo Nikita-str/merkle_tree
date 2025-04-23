@@ -155,7 +155,7 @@ mod tests {
         // 0 1 2 | 3 4 5 | 6 7 8 || 9 10 11 | 12 13 13 | 12 13 13 || ...   <-- result
         // 0 1 2 | 3 4 5 | 6 7 8 || 9 10 11 | 12 13 14 | 15 16 17 || ...   <-- index
         let result = "0 1 2 | 3 4 5 | 6 7 8 || 9 10 11 | 12 13 13 | 12 13 13 || 9 10 11 | 12 13 13 | 12 13 13";
-        let result = crate::tests::to_vec(result);
+        let result: Vec<usize> = crate::tests::to_vec(result);
         let indexes = (0..27).into_iter().collect::<Vec<_>>();
         assert_eq!(indexes.len(), result.len());
         for index in indexes {

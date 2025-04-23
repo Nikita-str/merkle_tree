@@ -6,6 +6,9 @@ pub mod utility;
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "bitcoin")]
+pub mod bitcoin;
+
 pub use merkle_tree::{MerkleTree, MtLvl, LeafId, NodeId};
 pub use hasher::{MtHasher, MtArityHasher, MtDataHasher, MtDataHasherStatic};
 
