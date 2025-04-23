@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use crate::bitcoin::{Hash, MerkleTreeBitcoin, SingleBlock};
 
 async fn ser_block_into_file(block: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -63,10 +65,10 @@ async fn bitcoin_block_100000_test() -> Result<(), Box<dyn std::error::Error>> {
     let tx3 = "e9a66845e05d5abc0ad04ec80f774a7e585c6e8db975962d069a522137b80c1d";
 
     let iter = vec![tx0, tx1, tx2, tx3];
-    let iter = iter.into_iter().map(|tx|Hash::deserialize_str(tx).unwrap());
+    let iter = iter.into_iter().map(|tx|Hash::from_str(tx).unwrap());
     let tree = MerkleTreeBitcoin::new_by_leafs(iter);
 
-    let expected_root: Hash = Hash::deserialize_str("f3e94742aca4b5ef85488dc37c06c3282295ffec960994b2c0d5ac2a25a95766")?;
+    let expected_root: Hash = "f3e94742aca4b5ef85488dc37c06c3282295ffec960994b2c0d5ac2a25a95766".parse()?;
     assert_eq!(expected_root, tree.root());
     Ok(())
 }
@@ -74,7 +76,7 @@ async fn bitcoin_block_100000_test() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn bitcoin_hash_test() {
     let hash_str = "abcdef01234567899abcdef012345678567abcdef01234567899abcdef012348";
-    let hash = Hash::deserialize_str(&hash_str).unwrap();
+    let hash = Hash::from_str(&hash_str).unwrap();
     let hash_str_from_hash = hash.to_string();
     assert_eq!(hash_str, hash_str_from_hash);
 }

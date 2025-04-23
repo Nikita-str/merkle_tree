@@ -1,6 +1,8 @@
+use std::str::FromStr;
 use sha2::{Sha256, Digest};
-
 use crate::{MtDataHasher, MtHasher};
+
+const HASH_CHAR_LEN: usize = 64;
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Hash {
@@ -29,33 +31,6 @@ impl Hash {
     }
     pub fn iter_le_bytes(&self) -> impl Iterator<Item = &u8> {
         self.hash.iter().rev()
-    }
-
-    pub fn deserialize_str(hash_str: &str) -> Result<Self, &'static str> {
-        if hash_str.len() != 64 { return Err("incorrect hash len") }
-
-        let mut hash = [0u8; 32];
-        let mut first_half = true;
-        let mut index = 0;
-        let mut val = 0;
-        for c in hash_str.chars() {
-            let half = if ('0'..='9').contains(&c) {
-                c as u8 - b'0'
-            } else {
-                c as u8 - b'a' + 10
-            };
-
-            val = (val << 4) + half;
-            if !first_half {
-                hash[31 - index] = val; // reversed order of bytes (LE)
-                index += 1;
-                val = 0;
-            } 
-
-            first_half = !first_half;
-        }
-
-        Ok(Self { hash })
     }
 }
 impl std::fmt::Debug for Hash {
@@ -96,9 +71,59 @@ impl<'de> serde::Deserialize<'de> for Hash {
     where D: serde::Deserializer<'de>
     {
         let hash_str = String::deserialize(deserializer)?;
-        Hash::deserialize_str(&hash_str).map_err(serde::de::Error::custom)
+        Hash::from_str(&hash_str).map_err(serde::de::Error::custom)
     }
 }
+
+#[derive(thiserror::Error, Debug)]
+pub enum ParseBitcoinHashError {
+    #[error("Invalid length of hash string. Expected length {HASH_CHAR_LEN}, but it was {0}.")]
+    InvalidLength(usize),
+    #[error("Unexpected hash character({0}). Allows only: '0'..='9'; 'a'..='f'")] // ? 'A'..='F'
+    UnexpectedChar(char),
+    
+}
+impl FromStr for Hash {
+    type Err = ParseBitcoinHashError;
+
+    fn from_str(hash_str: &str) -> Result<Self, Self::Err> {
+        if hash_str.len() != HASH_CHAR_LEN { 
+            return Err(ParseBitcoinHashError::InvalidLength(hash_str.len()))
+        }
+
+        let mut hash = [0u8; 32];
+        let mut first_half = true;
+        let mut index = 0;
+        let mut val = 0;
+        for c in hash_str.chars() {
+            let half = match c {
+                '0'..='9' => {
+                    c as u8 - b'0'
+                }
+                'a'..='f' => {
+                    c as u8 - b'a' + 10
+                }
+                _ => return Err(ParseBitcoinHashError::UnexpectedChar(c))
+            };
+
+            val = (val << 4) + half;
+            if !first_half {
+                hash[31 - index] = val; // reversed order of bytes (LE)
+                index += 1;
+                val = 0;
+            } 
+
+            first_half = !first_half;
+        }
+
+        Ok(Self { hash })
+    }
+}
+
+
+// ↑↑↑↑ Hash ↑↑↑↑
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ↓↓↓ Hasher ↓↓↓
 
 pub struct BitcoinHasher {
     inner: Sha256,

@@ -1,6 +1,6 @@
 
 mod hash;
-pub use hash::{Hash, BitcoinHasher};
+pub use hash::{Hash, BitcoinHasher, ParseBitcoinHashError};
 
 #[cfg(all(test, feature = "bitcoin_test"))]
 mod tests;
