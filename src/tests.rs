@@ -1006,6 +1006,170 @@ fn swap_remove_test() {
     }
 }
 
+#[test]
+fn subtree_height_test() {
+    type Hasher = UnsecureHasher; // AddHasher;
+    type Tree<const ARITY: usize> = MerkleTree<u64, Hasher, ARITY>;
+    let mut rng = rand::rng();
+
+    fn test_one<const N: usize>(tree: &Tree::<N>, expected: &Tree::<N>, vec: &Vec<u64>, height: usize, child: LeafId) {
+        let real = tree.subtree_by_height(Hasher::new(), child, height);
+        assert!(
+            real.eq_full(&expected), 
+            "N: {N}; h: {height}; c: {};\nvec = {vec:?}\n{real:?}\n=?=\n{expected:?}", 
+            child.index()
+        );
+    }
+
+    fn test<const N: usize>(vec: &Vec<u64>) {
+        let mut rng = rand::rng();
+        let tree = Tree::<N>::new_from_data(Hasher::new(), vec.clone());
+        for _ in 0..35 {
+            let height = rng.random_range(0..=6);
+            let child = LeafId::new(rng.random_range(0..vec.len()));
+
+            let expected = if height == 0 {
+                Tree::<N>::new_minimal(Hasher::new())
+            } else {
+                let child_amount = N.pow((height - 1) as u32);
+                let x = child.index() / child_amount;
+                let start = x * child_amount;
+                let end = vec.len().min((x + 1) * child_amount);
+                let iter = vec[start..end].iter().cloned();
+                Tree::<N>::new_from_data(Hasher::new(), iter)
+            };
+            test_one(&tree, &expected, vec, height, child);
+        }
+    }
+    
+    let vecs = vec![
+        (1u64..=4).collect::<Vec<_>>(),
+        vec![1],
+        vec![1, 2],
+        (1u64..=9).collect::<Vec<_>>(),
+        (1u64..=12).collect::<Vec<_>>(),
+        (1u64..=24).collect::<Vec<_>>(),
+        (1u64..=39).collect::<Vec<_>>(),
+        (1u64..=25).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+        (1u64..=27).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+        (1u64..=58).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+    ];
+
+    for vec in &vecs {
+        test::<2>(vec);
+        test::<3>(vec);
+        test::<5>(vec);
+    }
+
+    let a = to_vec_u64("0 1 2 | 3 4 5 | 6 7 8 || 9 10");
+    let tree_a = Tree::<3>::new_from_data(Hasher::new(), a.clone());
+    let b = to_vec_u64("9 10");
+    let tree_b = Tree::<3>::new_from_data(Hasher::new(), b.clone());
+    test_one(&tree_a, &tree_b, &a, 2, LeafId::new(10));
+    test_one(&tree_a, &tree_b, &a, 2, LeafId::new(9));
+    test_one(&tree_a, &tree_b, &a, 3, LeafId::new(10));
+
+    let tree_a_clone = tree_a.clone();
+    test_one(&tree_a, &tree_a_clone, &a, 4, LeafId::new(10));
+}
+
+#[test]
+fn subtree_leaf_test() {
+    type Hasher = UnsecureHasher; // AddHasher;
+    type Tree<const ARITY: usize> = MerkleTree<u64, Hasher, ARITY>;
+    let mut rng = rand::rng();
+
+    fn test_one<const N: usize>(tree: &Tree::<N>, expected: &Tree::<N>, vec: &Vec<u64>, ids: Vec<usize>) {
+        let iter = ids.iter().map(|id|LeafId::new(*id));
+        let real = tree.subtree_by_leaf(Hasher::new(), iter);
+        assert!(
+            real.eq_full(&expected), 
+            "N: {N}; ids: {ids:?};\nvec = {vec:?}\n{real:?}\n=?=\n{expected:?}", 
+        );
+    }
+
+    fn test_leaf<const N: usize>(vec: &Vec<u64>) {
+        let mut rng = rand::rng();
+        let tree = Tree::<N>::new_from_data(Hasher::new(), vec.clone());
+        for _ in 0..35 {
+            let a = rng.random_range(0..vec.len());
+            let b = rng.random_range(0..vec.len());
+
+            let start = a.min(b);
+            let end = a.max(b);
+            let mut len = 1;
+            while (start / len) * len + len <= end {
+                len *= N;
+            }
+            
+            let start = (start / len) * len;
+            let end = vec.len().min(start + len);
+            let iter = vec[start..end].iter().cloned();
+            let expected = Tree::<N>::new_from_data(Hasher::new(), iter);
+
+            test_one(&tree, &expected, vec, vec![a, b]);
+        }
+    }
+    
+    let vecs = vec![
+        (1u64..=4).collect::<Vec<_>>(),
+        vec![1],
+        vec![1, 2],
+        (1u64..=9).collect::<Vec<_>>(),
+        (1u64..=12).collect::<Vec<_>>(),
+        (1u64..=24).collect::<Vec<_>>(),
+        (1u64..=39).collect::<Vec<_>>(),
+        (1u64..=25).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+        (1u64..=27).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+        (1u64..=58).map(|_|rng.next_u64()).collect::<Vec<_>>(),
+    ];
+
+    for vec in &vecs {
+        test_leaf::<2>(vec);
+        test_leaf::<3>(vec);
+        test_leaf::<5>(vec);
+    }
+    
+    let a = to_vec_u64("0 1 2 | 3 4 5 | 6 7 8 || 9 10");
+    let tree_a = Tree::<3>::new_from_data(Hasher::new(), a.clone());
+    let b = to_vec_u64("9");
+    let tree_b = Tree::<3>::new_from_data(Hasher::new(), b.clone());
+    test_one(&tree_a, &tree_b, &a, vec![9]);
+    let b = to_vec_u64("10");
+    let tree_b = Tree::<3>::new_from_data(Hasher::new(), b.clone());
+    test_one(&tree_a, &tree_b, &a, vec![10]);
+    let b = to_vec_u64("9 10");
+    let tree_b = Tree::<3>::new_from_data(Hasher::new(), b.clone());
+    test_one(&tree_a, &tree_b, &a, vec![9, 10]);
+
+    let b = a.clone();
+    let tree_b = Tree::<3>::new_from_data(Hasher::new(), b.clone());
+    test_one(&tree_a, &tree_b, &a, vec![9, 7]);
+    test_one(&tree_a, &tree_b, &a, vec![9, 8]);
+    test_one(&tree_a, &tree_b, &a, vec![4, 144888, 13, 2]);
+    test_one(&tree_a, &tree_b, &a, vec![4, 13, 2]);
+    test_one(&tree_a, &tree_b, &a, vec![6, 5, 9, 7]);
+
+    let b = to_vec_u64("0 1 2 | 3 4 5 | 6 7 8 ");
+    let tree_b = Tree::<3>::new_from_data(Hasher::new(), b.clone());
+    test_one(&tree_a, &tree_b, &a, vec![8, 5]);
+    test_one(&tree_a, &tree_b, &a, vec![8, 7, 2, 6]);
+    test_one(&tree_a, &tree_b, &a, vec![4, 2]);
+    test_one(&tree_a, &tree_b, &a, vec![6, 5]);
+
+    let b = to_vec_u64("3 4 5");
+    let tree_b = Tree::<3>::new_from_data(Hasher::new(), b.clone());
+    test_one(&tree_a, &tree_b, &a, vec![3, 5]);
+    test_one(&tree_a, &tree_b, &a, vec![4, 5]);
+
+    let tree_b = Tree::<3>::new_minimal(Hasher::new());
+    test_one(&tree_a, &tree_b, &a, vec![11]);
+    test_one(&tree_a, &tree_b, &a, vec![15]);
+    test_one(&tree_a, &tree_b, &a, vec![45]);
+    test_one(&tree_a, &tree_b, &a, vec![75]);
+    test_one(&tree_a, &tree_b, &a, vec![1984]);
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // [+] AddHasher
 
@@ -1046,8 +1210,8 @@ impl crate::MtHasher<u64> for AddHasher {
         true
     }
 }
-impl crate::MtDataHasher<u64, u64> for AddHasher {
-    fn hash_data(&mut self, data: u64) -> u64 {
+impl crate::MtDataHasherStatic<u64, u64> for AddHasher {
+    fn hash_data_static(data: u64) -> u64 {        
         data
     }
 }

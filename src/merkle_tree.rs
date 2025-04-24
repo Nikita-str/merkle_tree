@@ -214,7 +214,7 @@ pub struct MerkleTree<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize
     new_lvl_cap: usize,
 }
 // TODO: diff
-// TODO: subtree
+// TODO: trait with tree types
 // TODO: extend / continuation to lvl & calc root (of n-th lvl)
 
 impl<Hash: Eq, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {
@@ -370,6 +370,7 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     }
 }
 impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash, Hasher, ARITY> {
+    #[inline]
     fn lvl_must(&self) -> usize {
         if self.is_empty() {
             0
@@ -897,6 +898,94 @@ impl<Hash, Hasher: ArityHasher<Hash, ARITY>, const ARITY: usize> MerkleTree<Hash
     where Hash: Clone
     {
         MtSerde::from_merkle_tree(&self)
+    }
+
+    pub fn subtree_by_height(&self, hasher: Hasher, child: LeafId, height: usize) -> Self
+    where Hash: Clone
+    {
+        if height == 0 {
+            return Self::new_minimal(hasher);
+        }
+
+        let child_amount = ARITY.pow((height - 1) as u32);
+        let child_min = (child.0 / child_amount) * child_amount;
+        let child_max = child_min + child_amount - 1;
+        self.subtree_inner(hasher, child_min, child_max, height)
+    }
+
+    pub fn subtree_by_leaf(&self, hasher: Hasher, leafs: impl IntoIterator<Item = LeafId>) -> Self
+    where Hash: Clone
+    {
+        let mut leafs = leafs.into_iter();
+
+        let Some(first) = leafs.next() else {
+            return Self::new_minimal(hasher);
+        };
+
+        let mut child_min = first.index();
+        let mut child_max = first.index();
+
+        for child in leafs {
+            let index = child.index();
+            if index < child_min {
+                child_min = index;
+            }
+            if child_max < index {
+                child_max = index;
+            }
+        }
+
+        if self.leaf_count() <= child_min {
+            return Self::new_minimal(hasher);
+        }
+
+        let mut height = 1;
+        let mut start = child_min;
+        let mut len = 1;
+        while start * len + len <= child_max {
+            height += 1;
+            len *= ARITY;
+            start /= ARITY;
+        }
+
+        let child_min = start * len;
+        let child_max = child_min + len - 1;
+
+        self.subtree_inner(hasher, child_min, child_max, height)
+    }
+    
+    pub fn subtree_inner(&self, hasher: Hasher, mut child_min: usize, mut child_max: usize, height: usize) -> Self
+    where Hash: Clone
+    {
+        if height >= self.height() {
+            return Self {
+                tree_lvls: self.tree_lvls.clone(),
+                hasher: Box::new(hasher),
+                add_lvl_sz: self.add_lvl_sz,
+                new_lvl_cap: self.new_lvl_cap,
+            }
+        }
+        
+        let mut child_amount = ARITY.pow(height as u32);
+        let mut tree_lvls = vec![];
+        
+        for lvl in 0..height {
+            let mut vec = Vec::<Hash>::with_capacity(child_amount);
+            child_max = child_max.min(self.lvl_len(lvl) - 1);
+            vec.extend_from_slice(&self.tree_lvls[lvl][child_min..=child_max]);
+            tree_lvls.push(vec);
+            if child_min == child_max { break }
+            child_min /= ARITY;
+            child_max /= ARITY;
+            child_amount /= ARITY;
+        }
+        
+        Self {
+            tree_lvls,
+            hasher: Box::new(hasher),
+            add_lvl_sz: self.add_lvl_sz,
+            new_lvl_cap: self.new_lvl_cap,
+        }
     }
 }
 
